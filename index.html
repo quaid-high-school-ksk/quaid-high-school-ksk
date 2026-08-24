@@ -309,6 +309,10 @@
     </div>
     <div id="hpOutput" style="margin-top:18px;"></div>
 
+    <div class="section-title"><span class="num">00B</span><h2>Study Notes</h2></div>
+    <p class="section-sub">Log in with your B-Form / ID Card No and password to read your class's study notes right here. Notes can be viewed and read, but downloading is not available &mdash; only the school office can download them.</p>
+    <div id="homeNotesWidgetWrap"></div>
+
     <div class="section-title"><span class="num">01</span><h2>Latest Notifications</h2></div>
     <div id="homeNoticesPreview"></div>
 
@@ -684,8 +688,9 @@ function renderHomeFeeWidget(){
   const records = DB.feeRecords || [];
   const months = ['All', ...Array.from(new Set(records.map(r=>r.month).filter(Boolean))).sort().reverse()];
   const classes = ['All', ...Array.from(new Set(records.map(r=>r.className).filter(Boolean)))];
-  const types = ['All', ...Array.from(new Set(records.map(r=>r.feeType||'Monthly Fee').filter(Boolean)))];
-  const filtered = records.filter(r=>(homeFeeMonthFilter==='All'||r.month===homeFeeMonthFilter) && (homeFeeClassFilter==='All'||r.className===homeFeeClassFilter) && (homeFeeTypeFilter==='All'||(r.feeType||'Monthly Fee')===homeFeeTypeFilter));
+  const splitTypes = r => (r.feeType||'Academy Fee (Monthly)').split(',').map(s=>s.trim()).filter(Boolean);
+  const types = ['All', ...Array.from(new Set(records.flatMap(splitTypes)))];
+  const filtered = records.filter(r=>(homeFeeMonthFilter==='All'||r.month===homeFeeMonthFilter) && (homeFeeClassFilter==='All'||r.className===homeFeeClassFilter) && (homeFeeTypeFilter==='All'||splitTypes(r).includes(homeFeeTypeFilter)));
   const collected = filtered.filter(r=>r.status==='paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending = filtered.filter(r=>r.status!=='paid').reduce((a,r)=>a+Number(r.amount||0),0);
   wrap.innerHTML = `<div class="admin-block" style="border:2px solid var(--gold);margin-bottom:18px;">
@@ -696,7 +701,7 @@ function renderHomeFeeWidget(){
     <p style="margin-top:12px;font-weight:700;">Collected: <span class="mono" style="color:var(--success);">Rs. ${collected.toLocaleString()}</span> &middot; Pending: <span class="mono" style="color:var(--danger);">Rs. ${pending.toLocaleString()}</span></p>
     ${filtered.length ? `<table style="margin-top:10px;">
       <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th></tr>
-      ${[...filtered].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Monthly Fee')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td></tr>`).join('')}
+      ${[...filtered].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td></tr>`).join('')}
     </table>` : '<div class="empty" style="margin-top:10px;">No fee records for this filter yet. Add them from the Admin Panel.</div>'}
   </div>`;
 }
@@ -1461,6 +1466,89 @@ function youTubeEmbedId(url){
   if(!url) return '';
   const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{6,15})/);
   return m ? m[1] : '';
+}
+
+// Homepage Study Notes widget: same login (B-Form + password) as the
+// Notes tab, and the same view-only rendering (no download link) &mdash;
+// just surfaced right on the homepage for convenience.
+function renderHomeNotesWidget(){
+  const wrap = document.getElementById('homeNotesWidgetWrap');
+  if(!wrap) return;
+  if(!notesLoggedInStudent){
+    wrap.innerHTML = `<div class="form-card" style="max-width:520px;">
+      <div class="row-2">
+        <div class="field"><label>B-Form / ID Card No</label><input id="hnBform" placeholder="e.g. 33202-1234567-1"></div>
+        <div class="field"><label>Password</label><input type="password" id="hnPass"></div>
+      </div>
+      <div id="hnMsg"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="button" class="btn-gold" onclick="homeNotesLogin()">Log In</button>
+        <button type="button" class="tag-btn ghost" onclick="homeNotesSetPassword()">Set Password (First Time)</button>
+      </div>
+    </div>`;
+    return;
+  }
+  const enroll = DB.enrollments.filter(e=>e.studentId===notesLoggedInStudent.id).sort((a,b)=>(b.session||'').localeCompare(a.session||''))[0];
+  const className = enroll ? enroll.className : null;
+  const rows = DB.notes
+    .filter(n=> !className || n.className===className)
+    .sort((a,b)=> new Date(b.date||0)-new Date(a.date||0))
+    .slice(0, 6);
+  const wmText = `Quaid High School KSK \u2022 ${notesLoggedInStudent.name}`;
+  wrap.innerHTML = `<p class="note-inline">Logged in as <b>${esc(notesLoggedInStudent.name)}</b>${className?' &middot; Class '+esc(className):''} &middot; <a href="#" onclick="homeNotesLogout();return false;" style="color:var(--gold);">Log Out</a></p>` +
+    (rows.length ? rows.map(n=>{
+      const ytId = youTubeEmbedId(n.videoLink);
+      return `
+      <div class="notice watermark-wrap">
+        ${watermarkHTML([wmText])}
+        <div style="position:relative;z-index:2;">
+          <div class="date">${esc(n.className)} &middot; ${esc(n.subject)}${n.date?' &middot; '+fmtDate(n.date):''}</div>
+          <h4>${esc(n.title)}</h4>
+          ${n.description ? `<p>${esc(n.description).replace(/\n/g,'<br>')}</p>` : ''}
+          ${n.fileUrl && n.fileType==='image' ? protectedImageHTML(n.fileUrl, n.title) : ''}
+          ${n.fileUrl && n.fileType==='pdf' ? pdfViewerHTML(n.fileUrl, n.title) : ''}
+          ${n.link ? `<p style="margin-top:10px;"><a href="${esc(n.link)}" target="_blank" rel="noopener" class="tag-btn ghost" style="text-decoration:none;display:inline-block;">Open Link &rarr;</a></p>` : ''}
+          ${ytId ? `<div style="margin-top:10px;max-width:480px;aspect-ratio:16/9;"><iframe src="https://www.youtube.com/embed/${esc(ytId)}" title="${esc(n.title)}" style="width:100%;height:100%;border:0;border-radius:8px;" allowfullscreen></iframe></div>`
+            : (n.videoLink ? `<p style="margin-top:10px;"><a href="${esc(n.videoLink)}" target="_blank" rel="noopener" class="tag-btn ghost" style="text-decoration:none;display:inline-block;">Watch Video &rarr;</a></p>` : '')}
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">No study notes available yet for your class.</div>') +
+    `<p style="margin-top:10px;"><button type="button" class="tag-btn ghost" data-goto="notes">See All Study Notes &rarr;</button></p>`;
+}
+async function homeNotesSetPassword(){
+  const bform = document.getElementById('hnBform').value.trim();
+  const pass = document.getElementById('hnPass').value;
+  const msg = document.getElementById('hnMsg');
+  if(!bform || !pass){ msg.innerHTML = '<div class="msg-err">Enter both B-Form No and a password.</div>'; return; }
+  const key = normalizeBform(bform);
+  const student = DB.students.find(s=>normalizeBform(s.bform)===key);
+  if(!student){ msg.innerHTML = '<div class="msg-err">No student found with this B-Form No. Check with the school office.</div>'; return; }
+  if(DB.studentAccounts[key]){ msg.innerHTML = '<div class="msg-err">A password is already set for this B-Form No. Please log in instead.</div>'; return; }
+  if(pass.length < 4){ msg.innerHTML = '<div class="msg-err">Password should be at least 4 characters.</div>'; return; }
+  DB.studentAccounts[key] = { password: pass, studentId: student.id };
+  await setData('studentAccounts', DB.studentAccounts);
+  msg.innerHTML = '<div class="msg-ok">Password set! You can now log in.</div>';
+}
+function homeNotesLogin(){
+  const bform = document.getElementById('hnBform').value.trim();
+  const pass = document.getElementById('hnPass').value;
+  const msg = document.getElementById('hnMsg');
+  if(!bform || !pass){ msg.innerHTML = '<div class="msg-err">Enter both B-Form No and password.</div>'; return; }
+  const key = normalizeBform(bform);
+  const account = DB.studentAccounts[key];
+  if(!account){ msg.innerHTML = '<div class="msg-err">No password set yet for this B-Form No. Use "Set Password" first.</div>'; return; }
+  if(account.password !== pass){ msg.innerHTML = '<div class="msg-err">Incorrect password.</div>'; return; }
+  const student = DB.students.find(s=>s.id===account.studentId);
+  if(!student){ msg.innerHTML = '<div class="msg-err">Account found but student profile is missing. Please contact the school office.</div>'; return; }
+  notesLoggedInStudent = student;
+  const enroll = DB.enrollments.filter(e=>e.studentId===student.id).sort((a,b)=>(b.session||'').localeCompare(a.session||''))[0];
+  notesClassFilter = enroll ? enroll.className : 'All';
+  notesSubjectFilter = 'All';
+  renderHomeNotesWidget();
+}
+function homeNotesLogout(){
+  notesLoggedInStudent = null;
+  renderHomeNotesWidget();
 }
 
 function renderNotes(){
@@ -2422,20 +2510,16 @@ function renderAdminPanel(){
             <option value="">Select class and session first</option>
           </select>
         </div>
-        <div class="row-2">
-          <div class="field"><label>Fee / Dues Type</label>
-            <select id="feeType" onchange="toggleFeeTypeOther()">
-              <option value="Academy Fee">Academy Fee (Monthly)</option>
-              <option value="Admission Fee">Admission Fee</option>
-              <option value="Exam Fee">Exam Fee</option>
-              <option value="Books Payment">Books Payment</option>
-              <option value="Copies Payment">Copies Payment</option>
-              <option value="Diaries Payment">Diaries Payment</option>
-              <option value="Other Charges">Other Charges</option>
-            </select>
+        <div class="field">
+          <label>Fee / Dues Type <span class="note-inline">(ek se zyada select kar sakte hain)</span></label>
+          <div id="feeTypeChecks" style="display:flex;flex-wrap:wrap;gap:10px 18px;padding:10px 0;">
+            ${['Academy Fee','School Fee','Admission Fee','Exam Fee','Books Payment','Copies Payment','Diaries Payment'].map(t=>`
+              <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" class="fee-type-check" value="${t==='Academy Fee'?'Academy Fee (Monthly)':esc(t)}" style="width:auto;"> ${esc(t==='Academy Fee'?'Academy Fee (Monthly)':t)}</label>
+            `).join('')}
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" id="feeTypeOtherCheck" onchange="toggleFeeTypeOther()" style="width:auto;"> Other Charges</label>
           </div>
-          <div class="field" id="feeTypeOtherWrap" style="display:none;"><label>Specify (for Other)</label><input id="feeTypeOther" placeholder="e.g. Library fine, Uniform, Late fine"></div>
         </div>
+        <div class="field" id="feeTypeOtherWrap" style="display:none;"><label>Specify (for Other)</label><input id="feeTypeOther" placeholder="e.g. Library fine, Uniform, Late fine"></div>
         <div class="row-2">
           <div class="field"><label>Month / Period / Description</label><input required id="feeMonth" placeholder="e.g. August 2026, or Annual, or one-time"></div>
           <div class="field"><label>Amount (Rs.)</label><input required type="number" id="feeAmount" placeholder="e.g. 1500"></div>
@@ -2456,7 +2540,7 @@ function renderAdminPanel(){
       <h3>All Fee &amp; Dues Records (${DB.feeRecords.length})</h3>
       ${DB.feeRecords.length ? `<table>
         <tr><th class="mono">Session</th><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th></th></tr>
-        ${[...DB.feeRecords].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Monthly Fee')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td>
+        ${[...DB.feeRecords].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td>
           <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeeStatus('${esc(r.id)}')">${r.status==='paid'?'Mark Unpaid':'Mark Paid'}</button>
           <button type="button" class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteFeeRecord('${esc(r.id)}')">Remove</button>
         </td></tr>`).join('')}
@@ -2616,15 +2700,16 @@ function renderAdminPanel(){
     const rollNo = document.getElementById('feeStudent').value;
     const session = document.getElementById('feeSession').value.trim();
     const className = document.getElementById('feeClass').value;
-    let feeType = document.getElementById('feeType').value;
-    if(feeType==='Other Charges'){
+    const checkedTypes = Array.from(document.querySelectorAll('.fee-type-check:checked')).map(cb=>cb.value);
+    if(document.getElementById('feeTypeOtherCheck').checked){
       const other = document.getElementById('feeTypeOther').value.trim();
-      if(other) feeType = other;
+      if(other) checkedTypes.push(other);
     }
+    const feeType = checkedTypes.join(', ');
     const month = document.getElementById('feeMonth').value.trim();
     const amount = document.getElementById('feeAmount').value;
     const status = document.getElementById('feeStatus').value;
-    if(!rollNo || !month || !amount){ return; }
+    if(!rollNo || !month || !amount || !feeType){ return; }
     const en = DB.enrollments.find(x=>x.rollNo===rollNo && x.session===session && x.className===className);
     const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
     const existingIdx = DB.feeRecords.findIndex(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month && r.feeType===feeType);
@@ -2881,9 +2966,9 @@ function toggleDsSubjectFields(checkbox){
 }
 
 function toggleFeeTypeOther(){
-  const type = document.getElementById('feeType').value;
+  const checked = document.getElementById('feeTypeOtherCheck').checked;
   const wrap = document.getElementById('feeTypeOtherWrap');
-  if(wrap) wrap.style.display = type==='Other Charges' ? 'block' : 'none';
+  if(wrap) wrap.style.display = checked ? 'block' : 'none';
 }
 function renderFeeStudentPicker(){
   const session = document.getElementById('feeSession').value.trim();
@@ -3537,6 +3622,7 @@ async function deleteResult(id){
   renderNotices();
   renderDateSheet();
   renderHomeFeeWidget();
+  renderHomeNotesWidget();
 })();
 </script>
 </body>
