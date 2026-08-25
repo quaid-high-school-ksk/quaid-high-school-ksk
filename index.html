@@ -691,8 +691,8 @@ function renderHomeFeeWidget(){
   const splitTypes = r => (r.feeType||'Academy Fee (Monthly)').split(',').map(s=>s.trim()).filter(Boolean);
   const types = ['All', ...Array.from(new Set(records.flatMap(splitTypes)))];
   const filtered = records.filter(r=>(homeFeeMonthFilter==='All'||r.month===homeFeeMonthFilter) && (homeFeeClassFilter==='All'||r.className===homeFeeClassFilter) && (homeFeeTypeFilter==='All'||splitTypes(r).includes(homeFeeTypeFilter)));
-  const collected = filtered.filter(r=>r.status==='paid').reduce((a,r)=>a+Number(r.amount||0),0);
-  const pending = filtered.filter(r=>r.status!=='paid').reduce((a,r)=>a+Number(r.amount||0),0);
+  const collected = filtered.reduce((a,r)=>a+feePaidOf(r),0);
+  const pending = filtered.reduce((a,r)=>a+feePendingOf(r),0);
   const studentSummary = buildStudentDuesSummary(filtered);
   wrap.innerHTML = `<div class="admin-block" style="border:2px solid var(--gold);margin-bottom:18px;">
     <h3>Fee &amp; Dues Record <span class="note-inline">(only visible to you, signed in as admin)</span></h3>
@@ -709,8 +709,10 @@ function renderHomeFeeWidget(){
     <table style="margin-top:4px;">
       <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th class="mono">Payment Date</th><th class="mono">Due Date</th></tr>
       ${[...filtered].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>{
-        const overdue = r.status!=='paid' && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
-        return `<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td></tr>`;
+        const pending = feePendingOf(r);
+        const overdue = pending>0 && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
+        const si = feeStatusInfo(r);
+        return `<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}${feePaidRemainingLine(r)}</td><td style="color:${si.color};font-weight:700;">${si.text}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td></tr>`;
       }).join('')}
     </table>` : '<div class="empty" style="margin-top:10px;">No fee records for this filter yet. Add them from the Admin Panel.</div>'}
   </div>`;
@@ -718,11 +720,37 @@ function renderHomeFeeWidget(){
 // Groups fee records by student (class+rollNo) and sums total / paid / pending
 // amounts, so admin can see at a glance "kitna total tha, kitna pay hua,
 // kitna baaki hai" for each student.
+// Amount actually paid so far for a record, falling back to the old
+// paid/unpaid-only logic for records saved before partial payments existed.
+function feePaidOf(r){
+  return r.paidAmount!=null ? Number(r.paidAmount) : (r.status==='paid' ? Number(r.amount||0) : 0);
+}
+// Amount still owed for a record (same fallback as feePaidOf).
+function feePendingOf(r){
+  return r.pendingAmount!=null ? Number(r.pendingAmount) : Math.max(Number(r.amount||0)-feePaidOf(r), 0);
+}
+// Returns a {text,color} status label, including "Partial" when some but not
+// all of the amount has been paid.
+function feeStatusInfo(r){
+  const total = Number(r.amount||0);
+  const paid = feePaidOf(r);
+  if(paid>=total && total>0) return {text:'Paid', color:'var(--success)'};
+  if(paid>0) return {text:'Partial', color:'var(--gold-dark)'};
+  return {text:'Unpaid', color:'var(--danger)'};
+}
 // Small helper: turns a fee record's per-type breakdown into a compact
 // "School Fee: 500, Copies: 200, Diaries: 100" line shown under Amount.
 function feeBreakdownLine(r){
   if(!r.breakdown || r.breakdown.length<2) return '';
   return `<div class="note-inline" style="margin-top:2px;">${r.breakdown.map(b=>`${esc(b.type)}: Rs. ${Number(b.amount||0).toLocaleString()}`).join(', ')}</div>`;
+}
+// Shows Paid / Remaining under the Amount when the record isn't fully paid,
+// so it's clear at a glance how much has actually been received.
+function feePaidRemainingLine(r){
+  const paid = feePaidOf(r);
+  const pending = feePendingOf(r);
+  if(pending<=0) return '';
+  return `<div class="note-inline" style="margin-top:2px;">Paid: Rs. ${paid.toLocaleString()} &middot; Remaining: Rs. ${pending.toLocaleString()}</div>`;
 }
 function buildStudentDuesSummary(records){
   const map = new Map();
@@ -730,9 +758,8 @@ function buildStudentDuesSummary(records){
     const key = (r.className||'')+'||'+(r.rollNo||'')+'||'+(r.studentName||'');
     if(!map.has(key)) map.set(key, { className:r.className, rollNo:r.rollNo, studentName:r.studentName, total:0, paid:0 });
     const s = map.get(key);
-    const amt = Number(r.amount||0);
-    s.total += amt;
-    if(r.status==='paid') s.paid += amt;
+    s.total += Number(r.amount||0);
+    s.paid += feePaidOf(r);
   });
   return Array.from(map.values()).map(s=>({...s, pending: s.total-s.paid}))
     .sort((a,b)=> b.pending-a.pending || (a.studentName||'').localeCompare(b.studentName||''));
@@ -2560,9 +2587,15 @@ function renderAdminPanel(){
         </div>
         <div class="field"><label>Status</label>
           <select id="feeStatus" onchange="toggleFeeDateFields()">
-            <option value="paid">Paid</option>
-            <option value="unpaid">Unpaid</option>
+            <option value="paid">Fully Paid</option>
+            <option value="unpaid">Unpaid / Partially Paid</option>
           </select>
+        </div>
+        <div id="feePaidWrap" style="display:none;">
+          <div class="row-2">
+            <div class="field"><label>Amount Already Paid (Rs.) <span class="note-inline">(agar kuch raqam mil chuki hai to yahan likhein)</span></label><input type="number" id="feePaidSoFar" value="0" oninput="updateFeeRemaining()" placeholder="e.g. 500"></div>
+            <div class="field"><label>Remaining</label><p class="mono" id="feeRemainingDisplay" style="font-weight:700;margin:8px 0 0;color:var(--danger);">Rs. 0</p></div>
+          </div>
         </div>
         <div class="row-2">
           <div class="field" id="feePaymentDateWrap"><label>Payment Date <span class="note-inline">(jis din pay hui)</span></label><input type="date" id="feePaymentDate"></div>
@@ -2588,9 +2621,12 @@ function renderAdminPanel(){
       ${DB.feeRecords.length ? `<table>
         <tr><th class="mono">Session</th><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th class="mono">Payment Date</th><th class="mono">Due Date</th><th></th></tr>
         ${[...DB.feeRecords].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>{
-          const overdue = r.status!=='paid' && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
-          return `<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td><td>
-          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeeStatus('${esc(r.id)}')">${r.status==='paid'?'Mark Unpaid':'Mark Paid'}</button>
+          const pending = feePendingOf(r);
+          const overdue = pending>0 && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
+          const si = feeStatusInfo(r);
+          return `<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}${feePaidRemainingLine(r)}</td><td style="color:${si.color};font-weight:700;">${si.text}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td><td>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="updateFeePaidAmount('${esc(r.id)}')">Update Paid</button>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeeStatus('${esc(r.id)}')">${si.text==='Paid'?'Mark Unpaid':'Mark Fully Paid'}</button>
           <button type="button" class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteFeeRecord('${esc(r.id)}')">Remove</button>
         </td></tr>`;
         }).join('')}
@@ -2764,15 +2800,17 @@ function renderAdminPanel(){
     const status = document.getElementById('feeStatus').value;
     const paymentDate = document.getElementById('feePaymentDate').value || null;
     const dueDate = document.getElementById('feeDueDate').value || null;
+    const paidAmount = status==='paid' ? amount : Math.max(0, Math.min(Number(document.getElementById('feePaidSoFar').value)||0, amount));
+    const pendingAmount = amount - paidAmount;
     if(!rollNo || !month || !amount || !feeType){ return; }
     const en = DB.enrollments.find(x=>x.rollNo===rollNo && x.session===session && x.className===className);
     const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
     const existingIdx = DB.feeRecords.findIndex(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month && r.feeType===feeType);
     const record = {
       id: existingIdx>=0 ? DB.feeRecords[existingIdx].id : uid(),
-      session, className, rollNo, studentName: stu ? stu.name : '', feeType, month, amount, status, breakdown,
-      paymentDate: status==='paid' ? paymentDate : null,
-      dueDate: status==='unpaid' ? dueDate : null
+      session, className, rollNo, studentName: stu ? stu.name : '', feeType, month, amount, status, breakdown, paidAmount, pendingAmount,
+      paymentDate: paidAmount>0 ? paymentDate : null,
+      dueDate: pendingAmount>0 ? dueDate : null
     };
     if(existingIdx>=0) DB.feeRecords[existingIdx] = record; else DB.feeRecords.push(record);
     await setData('feeRecords', DB.feeRecords);
@@ -3026,6 +3064,8 @@ function toggleFeeDateFields(){
   const status = document.getElementById('feeStatus').value;
   document.getElementById('feePaymentDateWrap').style.display = status==='paid' ? '' : 'none';
   document.getElementById('feeDueDateWrap').style.display = status==='unpaid' ? '' : 'none';
+  document.getElementById('feePaidWrap').style.display = status==='unpaid' ? '' : 'none';
+  updateFeeRemaining();
 }
 function toggleFeeTypeOther(){
   const checked = document.getElementById('feeTypeOtherCheck').checked;
@@ -3057,6 +3097,17 @@ function updateFeeTotal(){
   const total = Array.from(document.querySelectorAll('.fee-breakdown-input')).reduce((a,inp)=>a+(Number(inp.value)||0),0);
   const totalEl = document.getElementById('feeAmountTotal');
   if(totalEl) totalEl.textContent = 'Rs. ' + total.toLocaleString();
+  updateFeeRemaining();
+}
+// Shows how much is still left once "Amount Already Paid" is filled in,
+// so admin can see the exact remaining/due amount before saving.
+function updateFeeRemaining(){
+  const total = Array.from(document.querySelectorAll('.fee-breakdown-input')).reduce((a,inp)=>a+(Number(inp.value)||0),0);
+  const paidInput = document.getElementById('feePaidSoFar');
+  const paid = paidInput ? (Number(paidInput.value)||0) : 0;
+  const remaining = Math.max(total-paid, 0);
+  const remEl = document.getElementById('feeRemainingDisplay');
+  if(remEl) remEl.textContent = 'Rs. ' + remaining.toLocaleString();
 }
 function renderFeeStudentPicker(){
   const session = document.getElementById('feeSession').value.trim();
@@ -3219,16 +3270,45 @@ async function deleteStudentRequest(id){
   renderAdminPanel();
 }
 
+// Quick toggle: flips a record between fully paid and fully unpaid. For
+// partial payments, use "Update Paid" instead.
 async function toggleFeeStatus(id){
   const r = DB.feeRecords.find(x=>x.id===id);
   if(!r) return;
-  r.status = r.status==='paid' ? 'unpaid' : 'paid';
-  if(r.status==='paid'){
+  const total = Number(r.amount||0);
+  const currentlyFullyPaid = feePendingOf(r)<=0;
+  if(currentlyFullyPaid){
+    r.status = 'unpaid';
+    r.paidAmount = 0;
+    r.pendingAmount = total;
+    r.paymentDate = null;
+  } else {
+    r.status = 'paid';
+    r.paidAmount = total;
+    r.pendingAmount = 0;
     if(!r.paymentDate) r.paymentDate = new Date().toISOString().slice(0,10);
     r.dueDate = null;
-  } else {
-    r.paymentDate = null;
   }
+  await setData('feeRecords', DB.feeRecords);
+  renderAdminPanel();
+  renderHomeFeeWidget();
+}
+// Lets admin note a partial payment received against a record without
+// re-entering the whole entry: prompts for the new "paid so far" amount and
+// recalculates the remaining/pending amount and status.
+async function updateFeePaidAmount(id){
+  const r = DB.feeRecords.find(x=>x.id===id);
+  if(!r) return;
+  const total = Number(r.amount||0);
+  const current = feePaidOf(r);
+  const input = prompt(`Total: Rs. ${total.toLocaleString()}\nAbhi tak Paid: Rs. ${current.toLocaleString()}\n\nNaya "Paid So Far" amount likhein (Rs.):`, current);
+  if(input===null) return;
+  const paid = Math.max(0, Math.min(Number(input)||0, total));
+  r.paidAmount = paid;
+  r.pendingAmount = total - paid;
+  r.status = paid>=total ? 'paid' : 'unpaid';
+  if(paid>0 && !r.paymentDate) r.paymentDate = new Date().toISOString().slice(0,10);
+  if(paid>=total) r.dueDate = null;
   await setData('feeRecords', DB.feeRecords);
   renderAdminPanel();
   renderHomeFeeWidget();
