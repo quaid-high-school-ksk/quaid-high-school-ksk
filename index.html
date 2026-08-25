@@ -693,17 +693,49 @@ function renderHomeFeeWidget(){
   const filtered = records.filter(r=>(homeFeeMonthFilter==='All'||r.month===homeFeeMonthFilter) && (homeFeeClassFilter==='All'||r.className===homeFeeClassFilter) && (homeFeeTypeFilter==='All'||splitTypes(r).includes(homeFeeTypeFilter)));
   const collected = filtered.filter(r=>r.status==='paid').reduce((a,r)=>a+Number(r.amount||0),0);
   const pending = filtered.filter(r=>r.status!=='paid').reduce((a,r)=>a+Number(r.amount||0),0);
+  const studentSummary = buildStudentDuesSummary(filtered);
   wrap.innerHTML = `<div class="admin-block" style="border:2px solid var(--gold);margin-bottom:18px;">
     <h3>Fee &amp; Dues Record <span class="note-inline">(only visible to you, signed in as admin)</span></h3>
     <div class="filter-chips">${types.map(t=>`<button type="button" class="chip ${t===homeFeeTypeFilter?'active':''}" onclick="setHomeFeeTypeFilter('${esc(t)}')">${t==='All'?'All Types':esc(t)}</button>`).join('')}</div>
     <div class="filter-chips" style="margin-top:8px;">${months.map(m=>`<button type="button" class="chip ${m===homeFeeMonthFilter?'active':''}" onclick="setHomeFeeMonthFilter('${esc(m)}')">${m==='All'?'All Months':esc(m)}</button>`).join('')}</div>
     <div class="filter-chips" style="margin-top:8px;">${classes.map(c=>`<button type="button" class="chip ${c===homeFeeClassFilter?'active':''}" onclick="setHomeFeeClassFilter('${esc(c)}')">${c==='All'?'All Classes':esc(c)}</button>`).join('')}</div>
-    <p style="margin-top:12px;font-weight:700;">Collected: <span class="mono" style="color:var(--success);">Rs. ${collected.toLocaleString()}</span> &middot; Pending: <span class="mono" style="color:var(--danger);">Rs. ${pending.toLocaleString()}</span></p>
-    ${filtered.length ? `<table style="margin-top:10px;">
-      <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th></tr>
-      ${[...filtered].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td></tr>`).join('')}
+    <p style="margin-top:12px;font-weight:700;">Total: <span class="mono">Rs. ${(collected+pending).toLocaleString()}</span> &middot; Paid: <span class="mono" style="color:var(--success);">Rs. ${collected.toLocaleString()}</span> &middot; Pending: <span class="mono" style="color:var(--danger);">Rs. ${pending.toLocaleString()}</span></p>
+    ${studentSummary.length ? `<h4 style="margin:16px 0 6px;">Student-wise: Total / Paid / Pending</h4>
+    <table style="margin-top:4px;">
+      <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th class="mono">Total</th><th class="mono">Paid</th><th class="mono">Pending</th></tr>
+      ${studentSummary.map(s=>`<tr><td>${esc(s.className)}</td><td class="mono">${esc(s.rollNo)}</td><td>${esc(s.studentName)}</td><td class="mono">Rs. ${s.total.toLocaleString()}</td><td class="mono" style="color:var(--success);">Rs. ${s.paid.toLocaleString()}</td><td class="mono" style="color:${s.pending>0?'var(--danger)':'var(--success)'};font-weight:700;">Rs. ${s.pending.toLocaleString()}</td></tr>`).join('')}
+    </table>` : ''}
+    ${filtered.length ? `<h4 style="margin:16px 0 6px;">Entry-wise Detail</h4>
+    <table style="margin-top:4px;">
+      <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th class="mono">Payment Date</th><th class="mono">Due Date</th></tr>
+      ${[...filtered].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>{
+        const overdue = r.status!=='paid' && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
+        return `<tr><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td></tr>`;
+      }).join('')}
     </table>` : '<div class="empty" style="margin-top:10px;">No fee records for this filter yet. Add them from the Admin Panel.</div>'}
   </div>`;
+}
+// Groups fee records by student (class+rollNo) and sums total / paid / pending
+// amounts, so admin can see at a glance "kitna total tha, kitna pay hua,
+// kitna baaki hai" for each student.
+// Small helper: turns a fee record's per-type breakdown into a compact
+// "School Fee: 500, Copies: 200, Diaries: 100" line shown under Amount.
+function feeBreakdownLine(r){
+  if(!r.breakdown || r.breakdown.length<2) return '';
+  return `<div class="note-inline" style="margin-top:2px;">${r.breakdown.map(b=>`${esc(b.type)}: Rs. ${Number(b.amount||0).toLocaleString()}`).join(', ')}</div>`;
+}
+function buildStudentDuesSummary(records){
+  const map = new Map();
+  records.forEach(r=>{
+    const key = (r.className||'')+'||'+(r.rollNo||'')+'||'+(r.studentName||'');
+    if(!map.has(key)) map.set(key, { className:r.className, rollNo:r.rollNo, studentName:r.studentName, total:0, paid:0 });
+    const s = map.get(key);
+    const amt = Number(r.amount||0);
+    s.total += amt;
+    if(r.status==='paid') s.paid += amt;
+  });
+  return Array.from(map.values()).map(s=>({...s, pending: s.total-s.paid}))
+    .sort((a,b)=> b.pending-a.pending || (a.studentName||'').localeCompare(b.studentName||''));
 }
 function setHomeFeeMonthFilter(m){ homeFeeMonthFilter=m; renderHomeFeeWidget(); }
 function setHomeFeeClassFilter(c){ homeFeeClassFilter=c; renderHomeFeeWidget(); }
@@ -2514,21 +2546,27 @@ function renderAdminPanel(){
           <label>Fee / Dues Type <span class="note-inline">(ek se zyada select kar sakte hain)</span></label>
           <div id="feeTypeChecks" style="display:flex;flex-wrap:wrap;gap:10px 18px;padding:10px 0;">
             ${['Academy Fee','School Fee','Admission Fee','Exam Fee','Books Payment','Copies Payment','Diaries Payment'].map(t=>`
-              <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" class="fee-type-check" value="${t==='Academy Fee'?'Academy Fee (Monthly)':esc(t)}" style="width:auto;"> ${esc(t==='Academy Fee'?'Academy Fee (Monthly)':t)}</label>
+              <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" class="fee-type-check" value="${t==='Academy Fee'?'Academy Fee (Monthly)':esc(t)}" style="width:auto;" onchange="renderFeeAmountBreakdown()"> ${esc(t==='Academy Fee'?'Academy Fee (Monthly)':t)}</label>
             `).join('')}
             <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" id="feeTypeOtherCheck" onchange="toggleFeeTypeOther()" style="width:auto;"> Other Charges</label>
           </div>
         </div>
-        <div class="field" id="feeTypeOtherWrap" style="display:none;"><label>Specify (for Other)</label><input id="feeTypeOther" placeholder="e.g. Library fine, Uniform, Late fine"></div>
-        <div class="row-2">
-          <div class="field"><label>Month / Period / Description</label><input required id="feeMonth" placeholder="e.g. August 2026, or Annual, or one-time"></div>
-          <div class="field"><label>Amount (Rs.)</label><input required type="number" id="feeAmount" placeholder="e.g. 1500"></div>
+        <div class="field" id="feeTypeOtherWrap" style="display:none;"><label>Specify (for Other)</label><input id="feeTypeOther" placeholder="e.g. Library fine, Uniform, Late fine" oninput="renderFeeAmountBreakdown()"></div>
+        <div class="field"><label>Month / Period / Description</label><input required id="feeMonth" placeholder="e.g. August 2026, or Annual, or one-time"></div>
+        <div class="field">
+          <label>Amount (Rs.) <span class="note-inline">(har type ka alag likhein, total khud ban jayega)</span></label>
+          <div id="feeAmountBreakdown" style="display:flex;flex-wrap:wrap;gap:0 18px;"><div class="field" style="flex:1;min-width:160px;"><input type="number" class="fee-breakdown-input" data-type="" oninput="updateFeeTotal()" placeholder="Select a type above first"></div></div>
+          <p style="margin:6px 0 0;font-weight:700;">Total: <span class="mono" id="feeAmountTotal">Rs. 0</span></p>
         </div>
         <div class="field"><label>Status</label>
-          <select id="feeStatus">
+          <select id="feeStatus" onchange="toggleFeeDateFields()">
             <option value="paid">Paid</option>
             <option value="unpaid">Unpaid</option>
           </select>
+        </div>
+        <div class="row-2">
+          <div class="field" id="feePaymentDateWrap"><label>Payment Date <span class="note-inline">(jis din pay hui)</span></label><input type="date" id="feePaymentDate"></div>
+          <div class="field" id="feeDueDateWrap" style="display:none;"><label>Due Date <span class="note-inline">(baaki amount kab tak pay karni hai)</span></label><input type="date" id="feeDueDate"></div>
         </div>
         <div style="margin-top:16px;">
           <button type="submit" class="btn-gold">Save Entry</button>
@@ -2537,13 +2575,25 @@ function renderAdminPanel(){
     </div>
 
     <div class="admin-block">
+      <h3>Student-wise Dues Summary</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Har student ka total banta kitna tha, kitna pay ho chuka hai, aur kitna baaki hai.</p>
+      ${(() => { const s = buildStudentDuesSummary(DB.feeRecords); return s.length ? `<table>
+        <tr><th>Class</th><th class="mono">Roll No</th><th>Student</th><th class="mono">Total</th><th class="mono">Paid</th><th class="mono">Pending</th></tr>
+        ${s.map(x=>`<tr><td>${esc(x.className)}</td><td class="mono">${esc(x.rollNo)}</td><td>${esc(x.studentName)}</td><td class="mono">Rs. ${x.total.toLocaleString()}</td><td class="mono" style="color:var(--success);">Rs. ${x.paid.toLocaleString()}</td><td class="mono" style="color:${x.pending>0?'var(--danger)':'var(--success)'};font-weight:700;">Rs. ${x.pending.toLocaleString()}</td></tr>`).join('')}
+      </table>` : '<div class="empty">No fee records added yet.</div>'; })()}
+    </div>
+
+    <div class="admin-block">
       <h3>All Fee &amp; Dues Records (${DB.feeRecords.length})</h3>
       ${DB.feeRecords.length ? `<table>
-        <tr><th class="mono">Session</th><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th></th></tr>
-        ${[...DB.feeRecords].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>`<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td>
+        <tr><th class="mono">Session</th><th>Class</th><th class="mono">Roll No</th><th>Student</th><th>Type</th><th class="mono">Month/Period</th><th class="mono">Amount</th><th>Status</th><th class="mono">Payment Date</th><th class="mono">Due Date</th><th></th></tr>
+        ${[...DB.feeRecords].sort((a,b)=>(b.month||'').localeCompare(a.month||'')).map(r=>{
+          const overdue = r.status!=='paid' && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
+          return `<tr><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}</td><td style="color:${r.status==='paid'?'var(--success)':'var(--danger)'};font-weight:700;">${r.status==='paid'?'Paid':'Unpaid'}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td><td>
           <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeeStatus('${esc(r.id)}')">${r.status==='paid'?'Mark Unpaid':'Mark Paid'}</button>
           <button type="button" class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteFeeRecord('${esc(r.id)}')">Remove</button>
-        </td></tr>`).join('')}
+        </td></tr>`;
+        }).join('')}
       </table>` : '<div class="empty">No fee records added yet.</div>'}
     </div>
 
@@ -2707,15 +2757,22 @@ function renderAdminPanel(){
     }
     const feeType = checkedTypes.join(', ');
     const month = document.getElementById('feeMonth').value.trim();
-    const amount = document.getElementById('feeAmount').value;
+    const breakdown = Array.from(document.querySelectorAll('.fee-breakdown-input'))
+      .map(inp=>({ type: inp.dataset.type || feeType, amount: Number(inp.value)||0 }))
+      .filter(b=>b.amount>0);
+    const amount = breakdown.reduce((a,b)=>a+b.amount,0);
     const status = document.getElementById('feeStatus').value;
+    const paymentDate = document.getElementById('feePaymentDate').value || null;
+    const dueDate = document.getElementById('feeDueDate').value || null;
     if(!rollNo || !month || !amount || !feeType){ return; }
     const en = DB.enrollments.find(x=>x.rollNo===rollNo && x.session===session && x.className===className);
     const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
     const existingIdx = DB.feeRecords.findIndex(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month && r.feeType===feeType);
     const record = {
       id: existingIdx>=0 ? DB.feeRecords[existingIdx].id : uid(),
-      session, className, rollNo, studentName: stu ? stu.name : '', feeType, month, amount, status
+      session, className, rollNo, studentName: stu ? stu.name : '', feeType, month, amount, status, breakdown,
+      paymentDate: status==='paid' ? paymentDate : null,
+      dueDate: status==='unpaid' ? dueDate : null
     };
     if(existingIdx>=0) DB.feeRecords[existingIdx] = record; else DB.feeRecords.push(record);
     await setData('feeRecords', DB.feeRecords);
@@ -2965,10 +3022,41 @@ function toggleDsSubjectFields(checkbox){
   fieldsDiv.style.display = checkbox.checked ? 'block' : 'none';
 }
 
+function toggleFeeDateFields(){
+  const status = document.getElementById('feeStatus').value;
+  document.getElementById('feePaymentDateWrap').style.display = status==='paid' ? '' : 'none';
+  document.getElementById('feeDueDateWrap').style.display = status==='unpaid' ? '' : 'none';
+}
 function toggleFeeTypeOther(){
   const checked = document.getElementById('feeTypeOtherCheck').checked;
   const wrap = document.getElementById('feeTypeOtherWrap');
   if(wrap) wrap.style.display = checked ? 'block' : 'none';
+  renderFeeAmountBreakdown();
+}
+// Rebuilds one Amount input per selected fee/dues type (so School Fee, Copies,
+// Diaries etc. can each have their own amount), keeping any values already
+// typed, and updates the auto-computed Total shown below.
+function renderFeeAmountBreakdown(){
+  const container = document.getElementById('feeAmountBreakdown');
+  if(!container) return;
+  const old = {};
+  container.querySelectorAll('.fee-breakdown-input').forEach(inp=>{ old[inp.dataset.type] = inp.value; });
+  const checkedTypes = Array.from(document.querySelectorAll('.fee-type-check:checked')).map(cb=>cb.value);
+  if(document.getElementById('feeTypeOtherCheck') && document.getElementById('feeTypeOtherCheck').checked){
+    const other = document.getElementById('feeTypeOther').value.trim();
+    if(other) checkedTypes.push(other);
+  }
+  if(!checkedTypes.length){
+    container.innerHTML = `<div class="field" style="flex:1;min-width:160px;"><input type="number" class="fee-breakdown-input" data-type="" value="${esc(old['']||'')}" oninput="updateFeeTotal()" placeholder="Select a type above first"></div>`;
+  } else {
+    container.innerHTML = checkedTypes.map(t=>`<div class="field" style="flex:1;min-width:160px;"><label style="font-weight:400;font-size:13px;">${esc(t)}</label><input type="number" class="fee-breakdown-input" data-type="${esc(t)}" value="${esc(old[t]||'')}" oninput="updateFeeTotal()" placeholder="e.g. 500"></div>`).join('');
+  }
+  updateFeeTotal();
+}
+function updateFeeTotal(){
+  const total = Array.from(document.querySelectorAll('.fee-breakdown-input')).reduce((a,inp)=>a+(Number(inp.value)||0),0);
+  const totalEl = document.getElementById('feeAmountTotal');
+  if(totalEl) totalEl.textContent = 'Rs. ' + total.toLocaleString();
 }
 function renderFeeStudentPicker(){
   const session = document.getElementById('feeSession').value.trim();
@@ -3135,6 +3223,12 @@ async function toggleFeeStatus(id){
   const r = DB.feeRecords.find(x=>x.id===id);
   if(!r) return;
   r.status = r.status==='paid' ? 'unpaid' : 'paid';
+  if(r.status==='paid'){
+    if(!r.paymentDate) r.paymentDate = new Date().toISOString().slice(0,10);
+    r.dueDate = null;
+  } else {
+    r.paymentDate = null;
+  }
   await setData('feeRecords', DB.feeRecords);
   renderAdminPanel();
   renderHomeFeeWidget();
