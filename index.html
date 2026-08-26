@@ -762,6 +762,20 @@ function feePaymentsHistoryLine(r){
   if(!r.payments || r.payments.length<2) return '';
   return `<div class="note-inline" style="margin-top:2px;">Payments: ${r.payments.map(p=>`${fmtDate(p.date)}: Rs. ${Number(p.amount||0).toLocaleString()}`).join(', ')}</div>`;
 }
+// Returns the next class in sequence after className, or null if className
+// is the school's final class (Ten) with no further promotion.
+function nextClassOf(className){
+  const idx = CLASS_LIST.indexOf(className);
+  if(idx<0 || idx>=CLASS_LIST.length-1) return null;
+  return CLASS_LIST[idx+1];
+}
+// Sums the still-pending amount across every fee record for one student in
+// one class/session, used to show (and carry forward) dues when promoting.
+function studentPendingDuesFor(className, session, rollNo, studentName){
+  return DB.feeRecords
+    .filter(r=>r.className===className && r.session===session && r.rollNo===rollNo && r.studentName===studentName)
+    .reduce((a,r)=>a+feePendingOf(r), 0);
+}
 function buildStudentDuesSummary(records){
   const map = new Map();
   records.forEach(r=>{
@@ -891,6 +905,10 @@ let psFileDraft = null; // { url, name, type } for pairing scheme file upload, p
 let psFileRemoved = false;
 let enrollFilterSession = 'All';
 let enrollFilterClass = 'All';
+let promoteFromSession = String(new Date().getFullYear());
+let promoteFromClass = 'One';
+let promoteToSession = String(new Date().getFullYear()+1);
+let promoteExcluded = new Set(); // enrollment ids unchecked by admin before promoting
 let dsSessionFilter = 'All';
 let dsAdminClassFilter = 'All';
 let dsAdminSessionFilter = 'All';
@@ -2655,6 +2673,42 @@ function renderAdminPanel(){
       </table>` : '<div class="empty">No student portal accounts yet.</div>'}
     </div>
 
+    <div class="admin-block" style="border:2px solid var(--gold);">
+      <h3>Promote Students to Next Class</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Annual result ke baad har student ko agli class mein enroll karne ke liye. Naya enrollment (roll no, class, session) khud ban jayega, aur agar us student ki purani class mein koi <strong>fees baaki (pending)</strong> ho, wo automatically ek "Previous Class Dues" entry ki soorat mein nayi class ke fee record mein carry forward ho jayegi &mdash; koi purana pending record gum nahi hoga.</p>
+      <div class="row-2" style="max-width:600px;">
+        <div class="field"><label>From Session</label><input id="promoteFromSessionInput" value="${esc(promoteFromSession)}" onchange="promoteFromSession=this.value; promoteExcluded=new Set(); renderAdminPanel();" placeholder="e.g. 2026"></div>
+        <div class="field"><label>From Class</label>
+          <select id="promoteFromClassInput" onchange="promoteFromClass=this.value; promoteExcluded=new Set(); renderAdminPanel();">
+            ${CLASS_LIST.map(c=>`<option value="${esc(c)}" ${promoteFromClass===c?'selected':''}>${esc(c)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      ${(() => {
+        const nextClass = nextClassOf(promoteFromClass);
+        const list = DB.enrollments.filter(en=>en.session===promoteFromSession && en.className===promoteFromClass);
+        if(!nextClass){
+          return '<div class="empty" style="margin-top:10px;">Class "'+esc(promoteFromClass)+'" school ki aakhri class hai &mdash; ismein "next class" nahi hai (ye students Matric karke faarigh ho jate hain).</div>';
+        }
+        return `<div class="row-2" style="max-width:600px;margin-top:14px;">
+          <div class="field"><label>To Session</label><input id="promoteToSessionInput" value="${esc(promoteToSession)}" oninput="promoteToSession=this.value;" placeholder="e.g. 2027"></div>
+          <div class="field"><label>To Class</label><input value="${esc(nextClass)}" disabled style="opacity:.8;"></div>
+        </div>
+        ${list.length ? `<table style="margin-top:14px;">
+          <tr><th></th><th class="mono">Roll No</th><th>Name</th><th class="mono">Pending Dues</th></tr>
+          ${list.map(en=>{
+            const stu = DB.students.find(s=>s.id===en.studentId);
+            const pending = studentPendingDuesFor(en.className, en.session, en.rollNo, stu?stu.name:'');
+            const checked = !promoteExcluded.has(en.id);
+            return `<tr><td><input type="checkbox" class="promote-check" data-en="${esc(en.id)}" ${checked?'checked':''} onchange="if(this.checked){promoteExcluded.delete('${esc(en.id)}');}else{promoteExcluded.add('${esc(en.id)}');}" style="width:auto;"></td><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td><td class="mono" style="${pending>0?'color:var(--danger);font-weight:700;':''}">${pending>0?'Rs. '+pending.toLocaleString():'-'}</td></tr>`;
+          }).join('')}
+        </table>
+        <div style="margin-top:14px;">
+          <button type="button" class="btn-gold" onclick="promoteSelectedStudents()">Promote Selected Students to ${esc(nextClass)}</button>
+        </div>` : `<div class="empty" style="margin-top:10px;">Session ${esc(promoteFromSession)}, Class ${esc(promoteFromClass)} mein koi enrolled student nahi mila.</div>`}`;
+      })()}
+    </div>
+
     <div class="admin-block">
       <h3>Enrollments &mdash; All Students by Class (${DB.enrollments.length})</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Slip Access and Result Access are independent &mdash; e.g. turn off Slip Access while dues are pending, but keep Result Access on. "View Slip" always works here for office use, regardless of Slip Access.</p>
@@ -3400,6 +3454,61 @@ async function deleteEnrollment(id){
   DB.enrollments = DB.enrollments.filter(en=>en.id!==id);
   await setData('enrollments', DB.enrollments);
   renderAdminPanel();
+}
+
+// Promotes every checked student from (promoteFromClass, promoteFromSession)
+// into (nextClassOf(promoteFromClass), promoteToSession): creates/updates
+// their enrollment in the new class+session (same studentId & roll no), and
+// if they had any pending fee dues in the old class, adds a single
+// "Previous Class Dues (Carried Forward)" fee record in the new class so
+// nothing gets lost in the move up.
+async function promoteSelectedStudents(){
+  const nextClass = nextClassOf(promoteFromClass);
+  if(!nextClass) return;
+  const toSession = (document.getElementById('promoteToSessionInput')||{}).value || promoteToSession;
+  if(!toSession.trim()){ alert('Pehle "To Session" bhar dein.'); return; }
+  const list = DB.enrollments.filter(en=>en.session===promoteFromSession && en.className===promoteFromClass && !promoteExcluded.has(en.id));
+  if(!list.length){ alert('Koi student select nahi hua.'); return; }
+  let totalCarried = 0;
+  const details = list.map(en=>{
+    const stu = DB.students.find(s=>s.id===en.studentId);
+    const pending = studentPendingDuesFor(en.className, en.session, en.rollNo, stu?stu.name:'');
+    if(pending>0) totalCarried += pending;
+    return { en, stu, pending };
+  });
+  const withDues = details.filter(d=>d.pending>0).length;
+  const msg = `${list.length} student(s) ko "${promoteFromClass}" (${promoteFromSession}) se "${nextClass}" (${toSession}) mein promote kiya jayega.` +
+    (withDues ? `\n${withDues} student(s) ki total Rs. ${totalCarried.toLocaleString()} pending dues nayi class mein carry forward hongi.` : '') +
+    `\n\nJaari rakhein?`;
+  if(!confirm(msg)) return;
+
+  details.forEach(({en, stu, pending})=>{
+    const existingIdx = DB.enrollments.findIndex(e=>e.rollNo===en.rollNo && e.session===toSession && e.className===nextClass);
+    const record = {
+      id: existingIdx>=0 ? DB.enrollments[existingIdx].id : uid(),
+      studentId: en.studentId, rollNo: en.rollNo, session: toSession, className: nextClass,
+      slipEnabled: true, resultEnabled: true,
+      regNo: en.regNo, subjects: en.subjects || []
+    };
+    if(existingIdx>=0) DB.enrollments[existingIdx] = record; else DB.enrollments.push(record);
+
+    if(pending>0){
+      DB.feeRecords.push({
+        id: uid(), session: toSession, className: nextClass, rollNo: en.rollNo, studentName: stu?stu.name:'',
+        feeType: 'Previous Class Dues (Carried Forward)',
+        month: `Carried Forward from ${en.className} (${en.session})`,
+        amount: pending, status: 'unpaid', breakdown: [{ type: 'Previous Class Dues', amount: pending }],
+        paidAmount: 0, pendingAmount: pending, payments: [], paymentDate: null, dueDate: null
+      });
+    }
+  });
+
+  await setData('enrollments', DB.enrollments);
+  await setData('feeRecords', DB.feeRecords);
+  promoteExcluded = new Set();
+  alert('Promotion complete: ' + list.length + ' student(s) ab "' + nextClass + '" (' + toSession + ') mein enrolled hain.');
+  renderAdminPanel();
+  renderHomeFeeWidget();
 }
 
 async function toggleAccess(id, field){
