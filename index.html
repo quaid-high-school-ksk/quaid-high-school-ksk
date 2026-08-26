@@ -3256,6 +3256,7 @@ async function markAdmissionDone(id){
 }
 
 async function deleteAdmission(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.admissions = DB.admissions.filter(a=>a.id!==id);
   await setData('admissions', DB.admissions);
   renderAdminPanel();
@@ -3270,6 +3271,7 @@ async function markComplaintDone(id){
 }
 
 async function deleteComplaint(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.complaints = DB.complaints.filter(c=>c.id!==id);
   await setData('complaints', DB.complaints);
   renderAdminPanel();
@@ -3284,6 +3286,7 @@ async function markStudentRequestDone(id){
 }
 
 async function deleteStudentRequest(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.studentRequests = DB.studentRequests.filter(r=>r.id!==id);
   await setData('studentRequests', DB.studentRequests);
   renderAdminPanel();
@@ -3346,6 +3349,7 @@ async function addFeePayment(id){
 }
 
 async function deleteFeeRecord(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.feeRecords = DB.feeRecords.filter(r=>r.id!==id);
   await setData('feeRecords', DB.feeRecords);
   renderAdminPanel();
@@ -3365,12 +3369,14 @@ function editAboutUs(id){
   document.getElementById('aboutUsForm').scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function deleteAboutUs(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.aboutUs = DB.aboutUs.filter(p=>p.id!==id);
   await setData('aboutUs', DB.aboutUs);
   renderAdminPanel();
 }
 
 async function deleteNotification(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.notifications = DB.notifications.filter(n=>n.id!==id);
   await setData('notifications', DB.notifications);
   renderAdminPanel();
@@ -3383,12 +3389,14 @@ async function resetStudentPortalPassword(bform){
 }
 
 async function deleteStudent(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.students = DB.students.filter(s=>s.id!==id);
   await setData('students', DB.students);
   renderAdminPanel();
 }
 
 async function deleteEnrollment(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.enrollments = DB.enrollments.filter(en=>en.id!==id);
   await setData('enrollments', DB.enrollments);
   renderAdminPanel();
@@ -3436,6 +3444,7 @@ function editCalendarEntry(id){
   document.getElementById('calendarForm').scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function deleteCalendarEntry(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.academicCalendar = DB.academicCalendar.filter(e=>e.id!==id);
   await setData('academicCalendar', DB.academicCalendar);
   renderAcademicCalendar();
@@ -3466,6 +3475,7 @@ function editNoteEntry(id){
   document.getElementById('notesForm').scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function deleteNoteEntry(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.notes = DB.notes.filter(n=>n.id!==id);
   await setData('notes', DB.notes);
   renderNotes();
@@ -3495,6 +3505,7 @@ function editPairingEntry(id){
   document.getElementById('psForm').scrollIntoView({behavior:'smooth', block:'center'});
 }
 async function deletePairingEntry(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.pairingSchemes = DB.pairingSchemes.filter(p=>p.id!==id);
   await setData('pairingSchemes', DB.pairingSchemes);
   renderPairingScheme();
@@ -3796,12 +3807,14 @@ async function saveAttendance(){
 }
 
 async function deleteAttendanceEntry(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.attendance = DB.attendance.filter(a=>a.id!==id);
   await setData('attendance', DB.attendance);
   renderAdminPanel();
 }
 
 async function deleteDatesheetEntry(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.datesheet = DB.datesheet.filter(d=>d.id!==id);
   await setData('datesheet', DB.datesheet);
   renderDateSheet();
@@ -3809,6 +3822,7 @@ async function deleteDatesheetEntry(id){
 }
 
 async function deleteResult(id){
+  if(!confirm('Kya aap waqai ye record remove karna chahte hain? Ye dobara wapas nahi aayega.')) return;
   DB.results = DB.results.filter(r=>r.id!==id);
   await setData('results', DB.results);
   renderAdminPanel();
