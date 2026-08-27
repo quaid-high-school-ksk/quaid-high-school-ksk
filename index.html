@@ -2133,32 +2133,92 @@ function adminViewSlip(enrollmentId){
 let adminSlipMatches = [];
 let adminQuickSearchData = [];
 // Global admin search: live results as the admin types (same style as the
-// site's "Search the site..." bar), matching a student by name/father's
-// name/roll no/reg no across every session. Tapping a result jumps straight
-// to that session's filtered view in Student Profiles, Attendance, Fee
-// Records, Results, Enrollments, and Student Portal Accounts, and highlights
-// that student's exact row in each one.
+// site's "Search the site..." bar), searching across everything in the
+// admin panel &mdash; not just students. Covers Students/Enrollments, Fee &
+// Dues Records, Admissions, Complaints, and Notifications. Tapping a result
+// jumps to and highlights that exact record (or, for students, that whole
+// session's records across every section).
 function adminQuickSearch(){
-  const q = document.getElementById('adminQuickSearchInput').value.trim();
+  const qRaw = document.getElementById('adminQuickSearchInput').value.trim();
   const out = document.getElementById('adminQuickSearchResults');
-  if(!q){ out.classList.remove('open'); out.innerHTML = ''; return; }
-  adminQuickSearchData = findEnrollmentMatches(q).slice(0, 20);
+  if(!qRaw){ out.classList.remove('open'); out.innerHTML = ''; return; }
+  const q = qRaw.toLowerCase();
+  const results = [];
+
+  findEnrollmentMatches(qRaw).forEach(en=>{
+    results.push({
+      cat: `Student &middot; ${esc(en.className)}, Session ${esc(en.session)}`,
+      title: en.student.name || '-',
+      snippet: `Father: ${en.student.fatherName || '-'} &middot; Roll No: ${en.rollNo}`,
+      action: ()=> adminJumpToSession(en.session, en.rollNo, en.studentId)
+    });
+  });
+
+  DB.feeRecords.forEach(r=>{
+    const hay = ((r.studentName||'')+' '+(r.feeType||'')+' '+(r.month||'')+' '+(r.rollNo||'')).toLowerCase();
+    if(hay.includes(q)){
+      results.push({
+        cat: `Fee &amp; Dues &middot; ${esc(r.className)}, Session ${esc(r.session)}`,
+        title: `${r.studentName||'-'} &mdash; ${r.feeType||'Fee'}`,
+        snippet: `${r.month||''} &middot; Rs. ${Number(r.amount||0).toLocaleString()} &middot; ${feeStatusInfo(r).text}`,
+        action: ()=> adminScrollToRecord('fee-'+r.id, r.session, 'feeAdminSessionFilter')
+      });
+    }
+  });
+
+  DB.admissions.forEach(a=>{
+    const hay = ((a.studentName||'')+' '+(a.fatherName||'')+' '+(a.phone||'')).toLowerCase();
+    if(hay.includes(q)){
+      results.push({
+        cat: `Admission Application &middot; ${esc(a.className||'')}`,
+        title: a.studentName || '-',
+        snippet: `Father: ${a.fatherName||'-'} &middot; ${a.phone||''}`,
+        action: ()=> adminScrollToRecord('adm-'+a.id)
+      });
+    }
+  });
+
+  DB.complaints.forEach(c=>{
+    const hay = ((c.name||'')+' '+(c.studentName||'')+' '+(c.details||'')).toLowerCase();
+    if(hay.includes(q)){
+      results.push({
+        cat: 'Complaint',
+        title: c.name || c.studentName || '-',
+        snippet: (c.details||'').slice(0,80),
+        action: ()=> adminScrollToRecord('comp-'+c.id)
+      });
+    }
+  });
+
+  DB.notifications.forEach(n=>{
+    const hay = ((n.title||'')+' '+(n.body||'')).toLowerCase();
+    if(hay.includes(q)){
+      results.push({
+        cat: 'Notification',
+        title: n.title || '-',
+        snippet: (n.body||'').slice(0,80),
+        action: ()=> adminScrollToRecord('notif-'+n.id)
+      });
+    }
+  });
+
+  adminQuickSearchData = results.slice(0, 25);
   out.innerHTML = adminQuickSearchData.length
-    ? adminQuickSearchData.map((en,i)=>`
+    ? adminQuickSearchData.map((r,i)=>`
         <div class="search-result-item" onclick="goToAdminSearchResult(${i})">
-          <div class="cat">${esc(en.className)} &middot; Session ${esc(en.session)}</div>
-          <div class="title">${esc(en.student.name||'-')}</div>
-          <div class="snippet">Father: ${esc(en.student.fatherName||'-')} &middot; Roll No: ${esc(en.rollNo)}</div>
+          <div class="cat">${r.cat}</div>
+          <div class="title">${esc(r.title)}</div>
+          ${r.snippet ? `<div class="snippet">${esc(r.snippet)}</div>` : ''}
         </div>`).join('')
     : '<div class="search-empty">No matches found.</div>';
   out.classList.add('open');
 }
 function goToAdminSearchResult(i){
-  const en = adminQuickSearchData[i];
-  if(!en) return;
+  const r = adminQuickSearchData[i];
+  if(!r) return;
   document.getElementById('adminQuickSearchResults').classList.remove('open');
   document.getElementById('adminQuickSearchInput').value = '';
-  adminJumpToSession(en.session, en.rollNo, en.studentId);
+  r.action();
 }
 document.addEventListener('click', e=>{
   if(!e.target.closest('.admin-search-wrap')){
@@ -2202,6 +2262,23 @@ function adminJumpToSession(session, rollNo, studentId){
     });
   }, 60);
 }
+// Scrolls to and highlights one specific record (by its data-record-id),
+// used for search hits that aren't student/session based (Fee entries,
+// Admissions, Complaints, Notifications). If a sessionFilterVarName is
+// given, that global session-filter variable is set first so the record is
+// guaranteed to be visible in its list before scrolling to it.
+function adminScrollToRecord(recordId, session, sessionFilterVarName){
+  if(sessionFilterVarName==='feeAdminSessionFilter'){ feeAdminSessionFilter = session; }
+  renderAdminPanel();
+  setTimeout(()=>{
+    const el = document.querySelector(`[data-record-id="${recordId}"]`);
+    if(el){
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+      el.style.background = 'rgba(212,175,55,0.28)';
+      el.style.outline = '2px solid var(--gold)';
+    }
+  }, 60);
+}
 function adminSlipSearch(){
   const q = document.getElementById('adminSlipSearchInput').value.trim();
   const out = document.getElementById('adminSlipOutput');
@@ -2242,7 +2319,7 @@ function renderAdminPanel(){
 
     <div class="admin-block" style="border:2px solid var(--gold);">
       <h3>Quick Search &mdash; Jump to a Student's Session</h3>
-      <p class="note-inline" style="margin:-6px 0 14px;">Naam, Father's Name, Roll No, ya Reg No likhna shuru karein &mdash; jese jese type karenge, neeche live results aa jayenge. Kisi result par tap karein: jis session mein wo mila, uski har cheez (Student Profiles, Attendance, Fee Records, Results, Enrollments, Student Portal Account) khud us session par filter ho kar us student ki row gold rang mein highlight ho jayegi.</p>
+      <p class="note-inline" style="margin:-6px 0 14px;">Kuch bhi likhna shuru karein &mdash; student ka naam/roll no/reg no, fee type (jaise "Copies Payment"), admission ya complaint ka naam, ya notification ka title. Jese jese type karenge, neeche har cheez se matching live results aa jayenge. Kisi result par tap karein: student ho to us poori session ki har cheez filter+highlight ho jayegi, aur baaki (fee entry, admission, complaint, notification) ho to seedha wahi record highlight ho kar saamne aa jayega.</p>
       <div class="admin-search-wrap">
         <input id="adminQuickSearchInput" placeholder="Search by name, father's name, roll no, or reg no..." autocomplete="off" oninput="adminQuickSearch()" onfocus="adminQuickSearch()">
         <div class="search-results" id="adminQuickSearchResults"></div>
@@ -2271,7 +2348,7 @@ function renderAdminPanel(){
         ${[...DB.notifications].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(n=>{
           const st = noticeStatus(n);
           const status = st.isArchived ? 'Archived (record only)' : (st.isNew ? 'Showing "New" tag' : 'Showing normally');
-          return `<tr><td class="mono">${fmtDate(n.date)}</td><td>${esc(n.title)}</td><td>${status}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteNotification('${esc(n.id)}')">Remove</button></td></tr>`;
+          return `<tr data-record-id="notif-${esc(n.id)}"><td class="mono">${fmtDate(n.date)}</td><td>${esc(n.title)}</td><td>${status}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteNotification('${esc(n.id)}')">Remove</button></td></tr>`;
         }).join('')}
       </table>` : '<div class="empty">No notifications posted yet.</div>'}
     </div>
@@ -2591,6 +2668,22 @@ function renderAdminPanel(){
       <div id="attendancePicker"></div>
     </div>
 
+    <div class="admin-block" style="border:2px solid var(--gold);">
+      <h3>Students with No Attendance Marked Yet</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Har roz subah (jaise 10 baje tak) check karein &mdash; jin students ki aaj ke din ki attendance abhi tak record hi nahi hui (na Present, na Absent, na Leave), unki list yahan aayegi. Har naam ke saamne "Notify via WhatsApp" button hai (English message mein) jo parent ko bhejne ke liye seedha WhatsApp khol dega. Ye manual hai &mdash; khud check kar ke button dabana hoga, khud-ba-khud kisi ko bhejta nahi.</p>
+      <div class="row-2" style="max-width:600px;">
+        <div class="field"><label>Session / Year</label><input id="noAttSession" value="${esc(new Date().getFullYear().toString())}" onchange="renderNoAttendanceList()" placeholder="e.g. 2026"></div>
+        <div class="field"><label>Class</label>
+          <select id="noAttClass" onchange="renderNoAttendanceList()">
+            <option value="All">All Classes</option>
+            ${CLASS_LIST.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field" style="max-width:300px;"><label>Date</label><input type="date" id="noAttDate" value="${new Date().toISOString().slice(0,10)}" onchange="renderNoAttendanceList()"></div>
+      <div id="noAttendanceResults" style="margin-top:14px;"></div>
+    </div>
+
     <div class="admin-block" id="attendanceRecordsBlock">
       <h3>Attendance Records (${DB.attendance.length})</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Every attendance entry ever saved, kept on record. Click Edit to open that date/class above and correct it, or Remove to delete it.</p>
@@ -2618,7 +2711,7 @@ function renderAdminPanel(){
       <p class="note-inline" style="margin:-6px 0 14px;">Once you've contacted the family, click Done &mdash; it moves out of this list automatically and into the record below.</p>
       ${DB.admissions.filter(a=>a.status!=='done').length ? `<table>
         <tr><th>Student</th><th>Father</th><th>Class</th><th>Subjects/Group</th><th>Phone</th><th class="mono">Submitted</th><th></th></tr>
-        ${[...DB.admissions].filter(a=>a.status!=='done').reverse().map(a=>`<tr><td>${esc(a.studentName)}</td><td>${esc(a.fatherName)}</td><td>${esc(a.className)}</td><td>${esc(a.subjects||'-')}</td><td class="mono">${esc(a.phone)}</td><td class="mono">${fmtDate(a.submittedAt)}</td><td><button class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="markAdmissionDone('${esc(a.id)}')">Done</button></td></tr>`).join('')}
+        ${[...DB.admissions].filter(a=>a.status!=='done').reverse().map(a=>`<tr data-record-id="adm-${esc(a.id)}"><td>${esc(a.studentName)}</td><td>${esc(a.fatherName)}</td><td>${esc(a.className)}</td><td>${esc(a.subjects||'-')}</td><td class="mono">${esc(a.phone)}</td><td class="mono">${fmtDate(a.submittedAt)}</td><td><button class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="markAdmissionDone('${esc(a.id)}')">Done</button></td></tr>`).join('')}
       </table>` : '<div class="empty">No pending applications.</div>'}
     </div>
 
@@ -2627,7 +2720,7 @@ function renderAdminPanel(){
       <p class="note-inline" style="margin:-6px 0 14px;">Marked Done, kept here for record. Remove permanently any time.</p>
       ${DB.admissions.filter(a=>a.status==='done').length ? `<table>
         <tr><th>Student</th><th>Father</th><th>Class</th><th>Phone</th><th class="mono">Submitted</th><th></th></tr>
-        ${[...DB.admissions].filter(a=>a.status==='done').reverse().map(a=>`<tr><td>${esc(a.studentName)}</td><td>${esc(a.fatherName)}</td><td>${esc(a.className)}</td><td class="mono">${esc(a.phone)}</td><td class="mono">${fmtDate(a.submittedAt)}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteAdmission('${esc(a.id)}')">Remove</button></td></tr>`).join('')}
+        ${[...DB.admissions].filter(a=>a.status==='done').reverse().map(a=>`<tr data-record-id="adm-${esc(a.id)}"><td>${esc(a.studentName)}</td><td>${esc(a.fatherName)}</td><td>${esc(a.className)}</td><td class="mono">${esc(a.phone)}</td><td class="mono">${fmtDate(a.submittedAt)}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteAdmission('${esc(a.id)}')">Remove</button></td></tr>`).join('')}
       </table>` : '<div class="empty">Nothing here yet.</div>'}
     </div>
 
@@ -2636,7 +2729,7 @@ function renderAdminPanel(){
       <p class="note-inline" style="margin:-6px 0 14px;">Once resolved, click Done &mdash; it moves out of this list automatically and into the record below.</p>
       ${DB.complaints.filter(c=>c.status!=='done').length ? `<table>
         <tr><th>Name</th><th>Phone</th><th>Student</th><th>Roll No/Class</th><th>Details</th><th class="mono">Submitted</th><th></th></tr>
-        ${[...DB.complaints].filter(c=>c.status!=='done').reverse().map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td><td>${esc(c.studentName||'-')}</td><td>${esc(c.rollOrClass||'-')}</td><td style="max-width:220px;white-space:normal;">${esc(c.details)}</td><td class="mono">${fmtDate(c.submittedAt)}</td><td><button class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="markComplaintDone('${esc(c.id)}')">Done</button></td></tr>`).join('')}
+        ${[...DB.complaints].filter(c=>c.status!=='done').reverse().map(c=>`<tr data-record-id="comp-${esc(c.id)}"><td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td><td>${esc(c.studentName||'-')}</td><td>${esc(c.rollOrClass||'-')}</td><td style="max-width:220px;white-space:normal;">${esc(c.details)}</td><td class="mono">${fmtDate(c.submittedAt)}</td><td><button class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="markComplaintDone('${esc(c.id)}')">Done</button></td></tr>`).join('')}
       </table>` : '<div class="empty">No pending complaints.</div>'}
     </div>
 
@@ -2645,7 +2738,7 @@ function renderAdminPanel(){
       <p class="note-inline" style="margin:-6px 0 14px;">Marked Done, kept here for record. Remove permanently any time.</p>
       ${DB.complaints.filter(c=>c.status==='done').length ? `<table>
         <tr><th>Name</th><th>Phone</th><th>Student</th><th>Roll No/Class</th><th>Details</th><th class="mono">Submitted</th><th></th></tr>
-        ${[...DB.complaints].filter(c=>c.status==='done').reverse().map(c=>`<tr><td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td><td>${esc(c.studentName||'-')}</td><td>${esc(c.rollOrClass||'-')}</td><td style="max-width:220px;white-space:normal;">${esc(c.details)}</td><td class="mono">${fmtDate(c.submittedAt)}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteComplaint('${esc(c.id)}')">Remove</button></td></tr>`).join('')}
+        ${[...DB.complaints].filter(c=>c.status==='done').reverse().map(c=>`<tr data-record-id="comp-${esc(c.id)}"><td>${esc(c.name)}</td><td class="mono">${esc(c.phone)}</td><td>${esc(c.studentName||'-')}</td><td>${esc(c.rollOrClass||'-')}</td><td style="max-width:220px;white-space:normal;">${esc(c.details)}</td><td class="mono">${fmtDate(c.submittedAt)}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteComplaint('${esc(c.id)}')">Remove</button></td></tr>`).join('')}
       </table>` : '<div class="empty">Nothing here yet.</div>'}
     </div>
 
@@ -2706,10 +2799,11 @@ function renderAdminPanel(){
           </div>
         </div>
         <div class="field"><label>Student</label>
-          <select required id="feeStudent">
+          <select required id="feeStudent" onchange="renderFeeStudentPendingDues()">
             <option value="">Select class and session first</option>
           </select>
         </div>
+        <div id="feeStudentPendingBox"></div>
         <div class="field">
           <label>Fee / Dues Type <span class="note-inline">(ek se zyada select kar sakte hain)</span></label>
           <p class="note-inline" style="margin:-4px 0 8px;">Jin students ki fees pehle se baaki hain (is system se pehle ki), unke liye <strong>"Previous Pending Dues"</strong> select karein, amount likhein, aur Status "Unpaid / Partially Paid" rakhein &mdash; ye bhi baaki records ki tarah track hoti rahegi.</p>
@@ -2770,7 +2864,7 @@ function renderAdminPanel(){
           const pending = feePendingOf(r);
           const overdue = pending>0 && r.dueDate && new Date() > new Date(r.dueDate+'T23:59:59');
           const si = feeStatusInfo(r);
-          return `<tr data-roll="${esc(r.rollNo)}" data-session="${esc(r.session)}"><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}${feePaidRemainingLine(r)}${feePaymentsHistoryLine(r)}</td><td style="color:${si.color};font-weight:700;">${si.text}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td><td>
+          return `<tr data-roll="${esc(r.rollNo)}" data-session="${esc(r.session)}" data-record-id="fee-${esc(r.id)}"><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(r.feeType||'Academy Fee (Monthly)')}</td><td class="mono">${esc(r.month)}</td><td class="mono">Rs. ${Number(r.amount||0).toLocaleString()}${feeBreakdownLine(r)}${feePaidRemainingLine(r)}${feePaymentsHistoryLine(r)}</td><td style="color:${si.color};font-weight:700;">${si.text}</td><td class="mono">${r.paymentDate?fmtDate(r.paymentDate):'-'}</td><td class="mono" style="${overdue?'color:var(--danger);font-weight:700;':''}">${r.dueDate?fmtDate(r.dueDate):'-'}${overdue?' (Overdue)':''}</td><td>
           <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="addFeePayment('${esc(r.id)}')">Add Payment</button>
           <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeeStatus('${esc(r.id)}')">${si.text==='Paid'?'Mark Unpaid':'Mark Fully Paid'}</button>
           <button type="button" class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteFeeRecord('${esc(r.id)}')">Remove</button>
@@ -2871,6 +2965,7 @@ function renderAdminPanel(){
     </div>
   `;
 
+  renderNoAttendanceList();
 
   document.getElementById('aboutUsForm').addEventListener('submit', async e=>{
     e.preventDefault();
@@ -3318,6 +3413,25 @@ function renderFeeStudentPicker(){
     const stu = DB.students.find(s=>s.id===en.studentId);
     return `<option value="${esc(en.rollNo)}">${esc(en.rollNo)} &mdash; ${esc(stu?stu.name:'-')}</option>`;
   }).join('');
+  const box = document.getElementById('feeStudentPendingBox');
+  if(box) box.innerHTML = '';
+}
+// Shows the selected student's pending dues right under the Student picker
+// (for their currently selected class/session), so admin can see at a glance
+// how much they already owe before adding a new entry.
+function renderFeeStudentPendingDues(){
+  const box = document.getElementById('feeStudentPendingBox');
+  if(!box) return;
+  const session = document.getElementById('feeSession').value.trim();
+  const className = document.getElementById('feeClass').value;
+  const rollNo = document.getElementById('feeStudent').value;
+  if(!rollNo){ box.innerHTML = ''; return; }
+  const en = DB.enrollments.find(e=>e.rollNo===rollNo && e.session===session && e.className===className);
+  const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
+  const pending = studentPendingDuesFor(className, session, rollNo, stu?stu.name:'');
+  box.innerHTML = pending>0
+    ? `<div class="msg-err" style="margin:-4px 0 14px;">${esc(stu?stu.name:'Ye student')} ki is class/session mein Rs. ${pending.toLocaleString()} pehle se pending hain.</div>`
+    : `<p class="note-inline" style="margin:-4px 0 14px;color:var(--success);">${esc(stu?stu.name:'Ye student')} ki koi pending dues nahi hain.</p>`;
 }
 
 function renderResultStudentPicker(){
@@ -3948,6 +4062,41 @@ function markRollPresentFromCamera(rollNo){
     line.textContent = `Recognized: ${stu?stu.name:rollNo} (Roll No ${rollNo}) \u2014 ${mode==='departure'?'Departure':'Arrival'} at ${new Date().toLocaleTimeString()}`;
     log.prepend(line);
   }
+}
+
+// Lists every enrolled student (for the chosen session/class/date) who has
+// no attendance record at all yet today — not Present, Absent, or Leave —
+// so admin can manually notify their parent in English via WhatsApp. This is
+// a manual check, run any time in the morning (e.g. by 10 AM); nothing here
+// sends automatically on its own.
+function renderNoAttendanceList(){
+  const sessionEl = document.getElementById('noAttSession');
+  const classEl = document.getElementById('noAttClass');
+  const dateEl = document.getElementById('noAttDate');
+  const out = document.getElementById('noAttendanceResults');
+  if(!sessionEl || !classEl || !dateEl || !out) return;
+  const session = sessionEl.value.trim();
+  const className = classEl.value;
+  const date = dateEl.value;
+  if(!session || !date){ out.innerHTML = ''; return; }
+  const enrolled = DB.enrollments.filter(en=>en.session===session && (className==='All' || en.className===className));
+  if(!enrolled.length){ out.innerHTML = '<div class="empty">No students enrolled for this session/class.</div>'; return; }
+  const missing = enrolled.filter(en=>!DB.attendance.some(a=>a.rollNo===en.rollNo && a.session===en.session && a.className===en.className && a.date===date));
+  if(!missing.length){ out.innerHTML = '<p class="msg-ok">Everyone in this selection already has attendance marked for '+esc(fmtDate(date))+'.</p>'; return; }
+  out.innerHTML = `<table>
+    <tr><th class="mono">Roll No</th><th>Name</th><th>Class</th><th></th></tr>
+    ${missing.map(en=>{
+      const stu = DB.students.find(s=>s.id===en.studentId);
+      const rawPhone = (stu && stu.parentPhone || '').replace(/[^0-9]/g,'');
+      let action = '<span class="note-inline">No parent phone on file</span>';
+      if(rawPhone){
+        const waPhone = rawPhone.startsWith('0') ? '92'+rawPhone.slice(1) : rawPhone;
+        const msg = `Dear Parent, this is to inform you that ${stu?stu.name:'your child'} (Roll No ${en.rollNo}, Class ${en.className}) has not yet been marked present at school today (${fmtDate(date)}). Please contact the school office if there is any concern. - Quaid High School KSK`;
+        action = `<a class="tag-btn" style="text-decoration:none;" target="_blank" rel="noopener" href="${whatsappLink(msg, waPhone)}">Notify via WhatsApp</a>`;
+      }
+      return `<tr><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td><td>${esc(en.className)}</td><td>${action}</td></tr>`;
+    }).join('')}
+  </table>`;
 }
 
 function renderAttendancePicker(){
