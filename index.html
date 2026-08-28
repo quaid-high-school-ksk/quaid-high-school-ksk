@@ -1217,6 +1217,7 @@ function computeGrade(pct){
   if(pct>=60) return 'C'; if(pct>=50) return 'D'; if(pct>=33) return 'E'; return 'F';
 }
 function subjectPasses(s){
+  if(s.starPass) return true;
   if(s.absent) return false;
   const total = Number(s.total||0);
   if(total<=0) return true;
@@ -1261,6 +1262,21 @@ function overallResultLabel(subs, term){
   if(failed.length) parts.push('FAIL in ' + failed.join(', ') + termReappearNote(term));
   if(absent.length) parts.push('Not Appeared in ' + absent.join(', '));
   return parts.join(' &middot; ');
+}
+// General reappear-policy note shown at the bottom of a result whenever a
+// student has failed OR been marked Absent/Not Appeared in a subject (grace
+// "star pass" subjects don't count, since those are already passed).
+function reappearPolicyNote(subs){
+  if(!subs || !subs.length) return '';
+  const needsReappear = subs.some(s=>!s.starPass && (s.absent || !subjectPasses(s)));
+  if(!needsReappear) return '';
+  return `<p class="note-inline" style="margin-top:10px;"><b>Note:</b> A student who fails in, or is absent/not appeared in, one or more subjects will be given a chance to reappear &mdash; failing/absent in the 1st Term means reappearing in the 2nd Term, failing/absent in the 2nd Term means reappearing in the 3rd Term, and failing/absent in the 3rd Term or the Annual result means the paper must be reappeared within 10 days of the result.</p>`;
+}
+// Footnote shown when one or more subjects were passed on grace/star marks,
+// so the asterisk next to "Pass*" is explained.
+function starPassFootnote(subs){
+  if(!subs || !subs.some(s=>s.starPass)) return '';
+  return `<p class="note-inline" style="margin-top:6px;">* Grace marks awarded to pass this subject.</p>`;
 }
 // Ranks every student in a class+session by overall percentage (standard
 // competition ranking: tied percentages share the same position).
@@ -1360,13 +1376,14 @@ function renderResultCards(matches){
       </div>
       <table>
         <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
-        ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(subjectPasses(s)?'Pass':'Fail')}</td></tr>`).join('')}
+        ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(s.starPass?'Pass*':(subjectPasses(s)?'Pass':'Fail'))}</td></tr>`).join('')}
       </table>
       <p style="margin-top:14px;font-weight:700;">Total: <span class="mono">${total} / ${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span></p>
       <p style="margin-top:6px;font-weight:700;display:flex;gap:16px;flex-wrap:wrap;">
         <span>Position: <span class="mono">${posInfo ? posInfo.position+' of '+posInfo.outOf : '-'}</span></span>
         <span style="color:${passResult?'var(--success)':'var(--danger)'};">${esc(overallResultLabel(subs, m.term))}</span>
       </p>
+      ${reappearPolicyNote(subs)}${starPassFootnote(subs)}
     </div>
     <button class="tag-btn ghost" style="margin-bottom:20px;" onclick="printHTML(document.getElementById('resultCard-${idx}').outerHTML)">Print This Result</button>`;
   }).join('');
@@ -2280,9 +2297,9 @@ function adminViewSlip(enrollmentId){
     const passResult = isPassing(subs);
     resultHTML = `<table>
       <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
-      ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(subjectPasses(s)?'Pass':'Fail')}</td></tr>`).join('')}
+      ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(s.starPass?'Pass*':(subjectPasses(s)?'Pass':'Fail'))}</td></tr>`).join('')}
     </table>
-    <p style="margin-top:10px;font-weight:700;">${rec.term?'Term: <span class="mono">'+esc(rec.term)+'</span> &middot; ':''}Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${esc(overallResultLabel(subs, rec.term))}</span></p>`;
+    <p style="margin-top:10px;font-weight:700;">${rec.term?'Term: <span class="mono">'+esc(rec.term)+'</span> &middot; ':''}Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${esc(overallResultLabel(subs, rec.term))}</span></p>${reappearPolicyNote(subs)}${starPassFootnote(subs)}`;
   }
   const out = document.getElementById('adminSlipOutput');
   out.innerHTML = `
@@ -3229,11 +3246,12 @@ function renderAdminPanel(){
       const checked = row.querySelector('.rs-subject-check').checked;
       if(!checked) return;
       const absent = row.querySelector('.rs-absent').checked;
+      const starPass = row.querySelector('.rs-starpass').checked;
       subjects.push({
         subject: row.dataset.subject,
         obtained: absent ? 0 : row.querySelector('.rs-obtained').value,
         total: row.querySelector('.rs-total').value,
-        absent
+        absent, starPass
       });
     });
     const existingIdx = DB.results.findIndex(r=>r.rollNo===rollNo && r.session===session);
@@ -3694,6 +3712,9 @@ function renderResultSubjectPicker(){
         <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:6px;">
           <input type="checkbox" class="rs-absent" ${ex&&ex.absent?'checked':''} onchange="toggleRsAbsent(this)" style="width:auto;"> Absent / Not Appeared in this paper
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:4px;">
+          <input type="checkbox" class="rs-starpass" ${ex&&ex.starPass?'checked':''} onchange="toggleRsStarPass(this)" style="width:auto;"> Star Pass <span class="note-inline">(grace marks &mdash; pass despite the score, shown as "Pass*")</span>
+        </label>
       </div>
     </div>`;
   }).join('');
@@ -3701,8 +3722,18 @@ function renderResultSubjectPicker(){
 function toggleRsAbsent(checkbox){
   const row = checkbox.closest('.ds-subject-row');
   const obtainedInput = row.querySelector('.rs-obtained');
-  if(checkbox.checked){ obtainedInput.value = ''; obtainedInput.disabled = true; }
+  const starCheck = row.querySelector('.rs-starpass');
+  if(checkbox.checked){ obtainedInput.value = ''; obtainedInput.disabled = true; if(starCheck) starCheck.checked = false; }
   else { obtainedInput.disabled = false; }
+}
+function toggleRsStarPass(checkbox){
+  if(!checkbox.checked) return;
+  const row = checkbox.closest('.ds-subject-row');
+  const absentCheck = row.querySelector('.rs-absent');
+  if(absentCheck && absentCheck.checked){
+    absentCheck.checked = false;
+    toggleRsAbsent(absentCheck);
+  }
 }
 
 function handlePhotoUpload(e){
