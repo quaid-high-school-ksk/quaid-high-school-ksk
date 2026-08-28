@@ -30,8 +30,7 @@
     --radius:10px;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:'Inter',sans-serif;color:var(--ink);background:var(--cream);
-    -webkit-user-select:none;-moz-user-select:none;user-select:none;-webkit-touch-callout:none;}
+  body{margin:0;font-family:'Inter',sans-serif;color:var(--ink);background:var(--cream);}
   input,textarea,select{ -webkit-user-select:text;-moz-user-select:text;user-select:text; -webkit-touch-callout:default; }
   .protected-media{position:relative;-webkit-user-drag:none;user-drag:none;}
   .protected-media img{-webkit-user-drag:none;user-drag:none;pointer-events:none;}
@@ -440,7 +439,7 @@
   <!-- STUDENT PORTAL (B-FORM LOGIN) -->
   <section class="tab" id="tab-portal">
     <div class="section-title"><span class="num">10</span><h2>Student Portal</h2></div>
-    <p class="section-sub">Log in with the student's B-Form / ID Card No and password to see their enrollment record for every session. First time here? Set a password below.</p>
+    <p class="section-sub">Log in with the student's B-Form / ID Card No and password to see everything in one place: Enrollment Record, Pending Dues, Result, Roll No Slip, Date Sheet, Study Notes, and Pairing Scheme. First time here? Set a password below.</p>
     <div class="form-card" style="max-width:520px;">
       <div class="row-2">
         <div class="field"><label>B-Form / ID Card No</label><input id="spBform" placeholder="e.g. 33202-1234567-1"></div>
@@ -1109,17 +1108,16 @@ document.addEventListener('keydown', e=>{
    Screen / phone camera / screen recording) — that happens at the
    operating system level, outside any web page's control. What we CAN do
    is make casual copying/downloading/printing harder and less convenient:
-   - block right-click and text selection/copy
+   - block right-click and drag-and-drop of images
    - block common shortcuts: print, save-page, view-source, dev tools
    - stop Study Notes / Pairing Scheme files being offered as a direct
      download (shown in an online-only viewer instead)
    - add a watermark on notes so any leaked screenshot is traceable
+   Note: normal text selection and copy (Ctrl+C) are intentionally allowed
+   site-wide, so visitors can select and copy text as usual.
    ------------------------------------------------------------------ */
 document.addEventListener('contextmenu', e=>{ e.preventDefault(); });
 document.addEventListener('dragstart', e=>{ e.preventDefault(); });
-document.addEventListener('copy', e=>{
-  if(!e.target.closest('input, textarea')) e.preventDefault();
-});
 document.addEventListener('keydown', e=>{
   const k = e.key ? e.key.toLowerCase() : '';
   const combo = (e.ctrlKey || e.metaKey);
@@ -1938,13 +1936,96 @@ function buildPortalRecordHTML(student, scope){
 
   if(!enrolls.length){ return '<div class="msg-err">A student profile was found, but no enrollment records exist yet. Please contact the school office.</div>'; }
 
-  // Student Portal shows only the student's basic record per session here.
-  // Result Card, Roll No Slip, and Date Sheet each have their own dedicated
-  // sections/tabs, so they are not duplicated here.
+  const latest = enrolls[0];
+
+  // Pending Dues across every session this student has been enrolled in.
+  let totalPending = 0;
+  const duesRows = [];
+  enrolls.forEach(en=>{
+    const pending = studentPendingDuesFor(en.className, en.session, en.rollNo, student.name);
+    if(pending>0){ duesRows.push({ session: en.session, className: en.className, pending }); totalPending += pending; }
+  });
+  const duesHTML = duesRows.length
+    ? `<table><tr><th class="mono">Session</th><th>Class</th><th class="mono">Pending</th></tr>${duesRows.map(d=>`<tr><td class="mono">${esc(d.session)}</td><td>${esc(d.className)}</td><td class="mono" style="color:var(--danger);font-weight:700;">Rs. ${d.pending.toLocaleString()}</td></tr>`).join('')}</table>
+      <p style="margin-top:10px;font-weight:700;color:var(--danger);">Total Pending: Rs. ${totalPending.toLocaleString()}</p>
+      <p class="note-inline" style="margin-top:6px;">Please contact the school office to clear these dues.</p>`
+    : '<p class="msg-ok">No pending dues on record. All clear!</p>';
+
+  // Result cards for every session with Result Access on.
+  const { matches: resultMatches } = getResultMatchesForStudent(student.id);
+  const resultHTML = resultMatches.length ? renderResultCards(resultMatches) : '<div class="empty">No result entered yet.</div>';
+
+  // Roll No Slip (with its own embedded date sheet) for every session with
+  // Slip Access on.
+  const slipEligible = enrolls.filter(en=>en.slipEnabled);
+  const slipHTML = slipEligible.length
+    ? slipEligible.map((en,i)=>{
+        const cardId = 'portalSlip'+scope+i;
+        return slipCardHTML(en, cardId) + `
+        <div style="margin:10px 0 24px;">
+          <button class="btn-gold" onclick="downloadSlipFrom('${cardId}')">Download Slip as Image</button>
+          <button class="tag-btn ghost" onclick="printHTML(document.getElementById('${cardId}').outerHTML)">Print Slip</button>
+        </div>`;
+      }).join('')
+    : '<div class="empty">No roll no slip available yet.</div>';
+
+  // A compact date sheet across every session/class this student belongs to
+  // (the slip above already includes it per-session, but this gives a quick
+  // combined view).
+  const mySessions = new Set(enrolls.map(en=>en.session));
+  const myClasses = new Set(enrolls.map(en=>en.className));
+  const dsRows = DB.datesheet.filter(d=>myClasses.has(d.className) && mySessions.has(d.session)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const dsHTML = dsRows.length
+    ? `<table><tr><th class="mono">Session</th><th>Class</th><th>Subject</th><th class="mono">Date</th><th class="mono">Reporting Time</th><th class="mono">Timings</th></tr>
+      ${dsRows.map(d=>`<tr><td class="mono">${esc(d.session||'-')}</td><td>${esc(d.className)}</td><td>${esc(d.subject)}</td><td class="mono">${fmtDate(d.date)}</td><td class="mono">${esc(d.arrivalTime||'-')}</td><td class="mono">${esc(d.time||'-')}${d.endTime?' to '+esc(d.endTime):''}</td></tr>`).join('')}
+      </table>`
+    : '<div class="empty">No date sheet entries yet.</div>';
+
+  // Study Notes for this student's current class, watermarked with their name.
+  const notesRows = DB.notes.filter(n=>n.className===latest.className).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).slice(0,10);
+  const wmText = `Quaid High School KSK \u2022 ${student.name}`;
+  const notesHTML = notesRows.length
+    ? notesRows.map(n=>{
+        const ytId = youTubeEmbedId(n.videoLink);
+        return `<div class="notice watermark-wrap">
+          ${watermarkHTML([wmText])}
+          <div style="position:relative;z-index:2;">
+            <div class="date">${esc(n.className)} &middot; ${esc(n.subject)}${n.date?' &middot; '+fmtDate(n.date):''}</div>
+            <h4>${esc(n.title)}</h4>
+            ${n.description ? `<p>${esc(n.description).replace(/\n/g,'<br>')}</p>` : ''}
+            ${n.fileUrl && n.fileType==='image' ? protectedImageHTML(n.fileUrl, n.title) : ''}
+            ${n.fileUrl && n.fileType==='pdf' ? pdfViewerHTML(n.fileUrl, n.title) : ''}
+            ${n.link ? `<p style="margin-top:10px;"><a href="${esc(n.link)}" target="_blank" rel="noopener" class="tag-btn ghost" style="text-decoration:none;display:inline-block;">Open Link &rarr;</a></p>` : ''}
+            ${ytId ? `<div style="margin-top:10px;max-width:480px;aspect-ratio:16/9;"><iframe src="https://www.youtube.com/embed/${esc(ytId)}" title="${esc(n.title)}" style="width:100%;height:100%;border:0;border-radius:8px;" allowfullscreen></iframe></div>`
+              : (n.videoLink ? `<p style="margin-top:10px;"><a href="${esc(n.videoLink)}" target="_blank" rel="noopener" class="tag-btn ghost" style="text-decoration:none;display:inline-block;">Watch Video &rarr;</a></p>` : '')}
+          </div>
+        </div>`;
+      }).join('')
+    : '<div class="empty">No study notes available yet for your class.</div>';
+
+  // Pairing Scheme for this student's current class.
+  const psRows = DB.pairingSchemes.filter(p=>p.className===latest.className).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  const psHTML = psRows.length
+    ? psRows.map(p=>`<div class="notice watermark-wrap">
+        ${watermarkHTML(['Quaid High School KSK', p.className, p.term])}
+        <div style="position:relative;z-index:2;">
+          <div class="date">${esc(p.className)} &middot; ${esc(p.term)}${p.session?' &middot; Session '+esc(p.session):''}${p.date?' &middot; '+fmtDate(p.date):''}</div>
+          <h4>${esc(p.className)} &mdash; ${esc(p.term)} Pairing Scheme</h4>
+          ${p.content ? `<p>${esc(p.content).replace(/\n/g,'<br>')}</p>` : ''}
+          ${p.fileUrl && p.fileType==='image' ? protectedImageHTML(p.fileUrl, 'Pairing scheme') : ''}
+          ${p.fileUrl && p.fileType==='pdf' ? pdfViewerHTML(p.fileUrl, 'Pairing scheme') : ''}
+          ${p.link ? `<p style="margin-top:10px;"><a href="${esc(p.link)}" target="_blank" rel="noopener" class="tag-btn ghost" style="text-decoration:none;display:inline-block;">Open Link &rarr;</a></p>` : ''}
+        </div>
+      </div>`).join('')
+    : '<div class="empty">No pairing scheme available yet for your class.</div>';
+
   return `<div class="admin-block" style="background:#fff;margin-bottom:16px;">
       <h4 style="margin-bottom:8px;">${esc(student.name)}</h4>
       <p class="note-inline" style="margin:0;">Father's Name: ${esc(student.fatherName||'-')}${student.dob?' &middot; DOB: '+esc(fmtDate(student.dob)):''}${student.bform?' &middot; B-Form/ID No: '+esc(student.bform):''}</p>
-    </div>` + `<table>
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Enrollment Record</h4>
+      <table>
       <tr><th class="mono">Session</th><th>Class</th><th class="mono">Roll No</th><th class="mono">Registration No</th><th>Subjects</th></tr>
       ${enrolls.map(m=>`<tr>
         <td class="mono">${esc(m.session)}</td>
@@ -1953,8 +2034,32 @@ function buildPortalRecordHTML(student, scope){
         <td class="mono">${esc(m.regNo || (m.session+'-'+m.rollNo))}</td>
         <td>${esc(m.subjects||'-')}</td>
       </tr>`).join('')}
-    </table>
-    <p class="note-inline" style="margin-top:12px;">To view a Result Card, Roll No Slip, or Date Sheet, use the <b>Check Result</b>, <b>Roll No Slip</b>, or <b>Date Sheet</b> sections from the menu.</p>
+      </table>
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;border:2px solid var(--gold);">
+      <h4 style="margin-bottom:10px;">Pending Dues</h4>
+      ${duesHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Result</h4>
+      ${resultHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Roll No Slip</h4>
+      ${slipHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Date Sheet</h4>
+      ${dsHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Study Notes</h4>
+      ${notesHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Pairing Scheme</h4>
+      ${psHTML}
+    </div>
     ${buildStudentRequestSectionHTML(student, scope, enrolls[0])}`;
 }
 
