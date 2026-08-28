@@ -458,12 +458,17 @@
   <!-- RESULTS -->
   <section class="tab" id="tab-results">
     <div class="section-title"><span class="num">04</span><h2>Check Result</h2></div>
-    <p class="section-sub">Search by Registration No only &mdash; every session (year) that has been entered will show, newest first.</p>
-    <div class="search-bar">
-      <input id="resultRollInput" placeholder="Registration No">
-      <button onclick="lookupResult()">Search</button>
+    <p class="section-sub">Log in with the student's B-Form / ID Card No and password to see their result for every session. First time here? Set a password below.</p>
+    <div class="row-2">
+      <div class="field"><label>B-Form / ID Card No</label><input id="rtBform" placeholder="e.g. 33202-1234567-1"></div>
+      <div class="field"><label>Password</label><input id="rtPass" type="password" placeholder="Password"></div>
     </div>
-    <div id="resultOutput"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <button onclick="resultPortalLogin()">Log In &amp; View Result</button>
+      <button class="tag-btn ghost" onclick="resultPortalSetPassword()">Set Password (First Time)</button>
+    </div>
+    <div id="rtMsg" style="margin-top:10px;"></div>
+    <div id="resultOutput" style="margin-top:14px;"></div>
   </section>
 
   <!-- DATE SHEET -->
@@ -1223,12 +1228,21 @@ function isPassing(subs){
   return subs.every(s=>subjectPasses(s));
 }
 // Returns ", in Math, Islamic Studies" etc. listing every subject a student
-// failed, so "FAIL" always says which subject(s) instead of just "FAIL".
-// Empty string when the student passed (or there are no subjects).
-function failingSubjectsSuffix(subs){
+// failed, plus a reappear note based on the term: fail in 1st Term means
+// reappear in 2nd Term, fail in 2nd Term means reappear in 3rd Term, and
+// fail in 3rd Term means the student can reappear for the paper within 10
+// days of this result. Empty string when the student passed (or there are
+// no subjects).
+function termReappearNote(term){
+  if(term==='1st Term') return ' (Reappear in 2nd Term)';
+  if(term==='2nd Term') return ' (Reappear in 3rd Term)';
+  if(term==='3rd Term') return ' (Reappear paper within 10 days of this result)';
+  return '';
+}
+function failingSubjectsSuffix(subs, term){
   if(!subs || !subs.length) return '';
   const failed = subs.filter(s=>!subjectPasses(s)).map(s=>s.subject);
-  return failed.length ? ' in ' + failed.join(', ') : '';
+  return failed.length ? ' in ' + failed.join(', ') + termReappearNote(term) : '';
 }
 // Ranks every student in a class+session by overall percentage (standard
 // competition ranking: tied percentages share the same position).
@@ -1287,38 +1301,22 @@ function findEnrollmentMatchesByRegOnly(query){
     .sort((a,b)=> (b.session||'').localeCompare(a.session||''));
 }
 
-function getResultMatches(query){
-  const q = query.trim().toLowerCase();
+// Builds every result card (across every session) for one specific student,
+// used after the B-Form + Password login on the Check Result tab. Only
+// sessions with Result Access turned on for that enrollment are included.
+function getResultMatchesForStudent(studentId){
+  const student = DB.students.find(s=>s.id===studentId) || {};
   const outcome = { matches: [], blocked: 0 };
-  if(!q) return outcome;
-  const seen = new Set();
-
-  findEnrollmentMatchesByRegOnly(q).forEach(en=>{
-    const key = en.rollNo+'|'+en.session;
-    if(seen.has(key)) return;
-    if(!en.resultEnabled){ outcome.blocked++; seen.add(key); return; }
-    seen.add(key);
+  const enrolls = DB.enrollments.filter(en=>en.studentId===studentId).sort((a,b)=>(b.session||'').localeCompare(a.session||''));
+  enrolls.forEach(en=>{
+    if(!en.resultEnabled){ outcome.blocked++; return; }
     const rec = DB.results.find(r=>r.rollNo===en.rollNo && r.session===en.session);
-    outcome.matches.push({ rollNo:en.rollNo, session:en.session, className:en.className, subjects: rec ? (rec.subjects||[]) : [], student: en.student });
+    outcome.matches.push({ rollNo:en.rollNo, session:en.session, className:en.className, subjects: rec ? (rec.subjects||[]) : [], term: rec ? (rec.term||'') : '', student });
   });
-
-  outcome.matches.sort((a,b)=> (b.session||'').localeCompare(a.session||''));
   return outcome;
 }
-
-function lookupResult(){
-  const q = document.getElementById('resultRollInput').value.trim();
-  const out = document.getElementById('resultOutput');
-  if(!q){ out.innerHTML = '<div class="msg-err">Enter the Registration No to search.</div>'; return; }
-  const { matches, blocked } = getResultMatches(q);
-  if(matches.length===0){
-    out.innerHTML = blocked>0
-      ? '<div class="msg-err">A record was found, but the result hasn\'t been made available yet. Please contact the school office.</div>'
-      : '<div class="msg-err">No record found. Check the Registration No and try again.</div>';
-    return;
-  }
-
-  out.innerHTML = matches.map((m,idx)=>{
+function renderResultCards(matches){
+  return matches.map((m,idx)=>{
     const subs = m.subjects || [];
     const photoImg = studentPhotoHTML((m.student && m.student.photo) || '', 56, 68);
     if(subs.length===0){
@@ -1336,7 +1334,7 @@ function lookupResult(){
         <div style="display:flex;gap:12px;align-items:center;">
           ${photoImg}
           <div>
-            <h3>${esc((m.student&&m.student.name)||'-')} &mdash; Session ${esc(m.session)}</h3>
+            <h3>${esc((m.student&&m.student.name)||'-')} &mdash; Session ${esc(m.session)}${m.term?' &middot; '+esc(m.term):''}</h3>
             <div class="id">Class ${esc(m.className)} &middot; Roll No ${esc(m.rollNo)}</div>
           </div>
         </div>
@@ -1349,12 +1347,52 @@ function lookupResult(){
       <p style="margin-top:14px;font-weight:700;">Total: <span class="mono">${total} / ${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span></p>
       <p style="margin-top:6px;font-weight:700;display:flex;gap:16px;flex-wrap:wrap;">
         <span>Position: <span class="mono">${posInfo ? posInfo.position+' of '+posInfo.outOf : '-'}</span></span>
-        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs))}</span>
+        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs, m.term))}</span>
       </p>
     </div>
     <button class="tag-btn ghost" style="margin-bottom:20px;" onclick="printHTML(document.getElementById('resultCard-${idx}').outerHTML)">Print This Result</button>`;
   }).join('');
 }
+// Check Result tab: requires the student's B-Form No + password (same
+// account used for Study Notes / Student Portal) before showing any result,
+// so results aren't visible to just anyone who happens to know a roll no.
+function resultPortalLogin(){
+  const bform = document.getElementById('rtBform').value.trim();
+  const pass = document.getElementById('rtPass').value;
+  const msg = document.getElementById('rtMsg');
+  const out = document.getElementById('resultOutput');
+  out.innerHTML = '';
+  if(!bform || !pass){ msg.innerHTML = '<div class="msg-err">Enter both B-Form No and password.</div>'; return; }
+  const key = normalizeBform(bform);
+  const account = DB.studentAccounts[key];
+  if(!account){ msg.innerHTML = '<div class="msg-err">No password set yet for this B-Form No. Use "Set Password (First Time)" first.</div>'; return; }
+  if(account.password !== pass){ msg.innerHTML = '<div class="msg-err">Incorrect password.</div>'; return; }
+  const { matches, blocked } = getResultMatchesForStudent(account.studentId);
+  if(matches.length===0){
+    msg.innerHTML = blocked>0
+      ? '<div class="msg-err">A record was found, but the result hasn\'t been made available yet. Please contact the school office.</div>'
+      : '<div class="msg-err">No result found for this student yet.</div>';
+    return;
+  }
+  msg.innerHTML = '';
+  out.innerHTML = renderResultCards(matches);
+}
+function resultPortalSetPassword(){
+  const bform = document.getElementById('rtBform').value.trim();
+  const pass = document.getElementById('rtPass').value;
+  const msg = document.getElementById('rtMsg');
+  document.getElementById('resultOutput').innerHTML = '';
+  if(!bform || !pass){ msg.innerHTML = '<div class="msg-err">Enter both B-Form No and a password.</div>'; return; }
+  const key = normalizeBform(bform);
+  const student = DB.students.find(s=>normalizeBform(s.bform)===key);
+  if(!student){ msg.innerHTML = '<div class="msg-err">No student found with this B-Form No. Check with the school office &mdash; make sure it matches exactly what was entered in their profile.</div>'; return; }
+  if(DB.studentAccounts[key]){ msg.innerHTML = '<div class="msg-err">A password is already set for this B-Form No. Please log in instead, or ask the school office to reset it.</div>'; return; }
+  if(pass.length < 4){ msg.innerHTML = '<div class="msg-err">Password should be at least 4 characters.</div>'; return; }
+  DB.studentAccounts[key] = { password: pass, studentId: student.id };
+  setData('studentAccounts', DB.studentAccounts);
+  msg.innerHTML = '<div class="msg-ok">Password set! You can now log in above to view the result.</div>';
+}
+
 
 /* ---------------- DATE SHEET ---------------- */
 function renderDateSheet(){
@@ -1823,13 +1861,14 @@ function renderGazette(){
   const rows = released.map(en=>{
     const stu = DB.students.find(s=>s.id===en.studentId) || {};
     const rec = DB.results.find(r=>r.rollNo===en.rollNo && r.session===en.session);
-    return { rollNo: en.rollNo, name: stu.name || '-', fatherName: stu.fatherName || '-', subs: (rec && rec.subjects) || [] };
+    return { rollNo: en.rollNo, name: stu.name || '-', fatherName: stu.fatherName || '-', subs: (rec && rec.subjects) || [], term: rec ? (rec.term||'') : '' };
   }).filter(r=>r.subs.length>0);
 
   if(rows.length===0){
     out.innerHTML = '<div class="empty">No released results for this class and session yet. Results appear here automatically as soon as Result Access is turned on for each student.</div>';
     return;
   }
+  const gazetteTerm = rows.find(r=>r.term)?.term || '';
 
   const subjectOrder = [];
   rows.forEach(r=>r.subs.forEach(s=>{ if(!subjectOrder.includes(s.subject)) subjectOrder.push(s.subject); }));
@@ -1856,12 +1895,12 @@ function renderGazette(){
       <td class="mono">${pct}%</td>
       <td><span class="grade-pill" style="font-size:11px;">${computeGrade(pct)}</span></td>
       <td class="mono">${posInfo ? posInfo.position : '-'}</td>
-      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(r.subs))}</td>
+      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(r.subs, r.term))}</td>
     </tr>`;
   }).join('');
 
   out.innerHTML = `<div id="gazettePrintable">
-    ${schoolBrandHTML('Result Gazette &mdash; Class ' + esc(className) + ' &middot; Session ' + esc(session))}
+    ${schoolBrandHTML('Result Gazette &mdash; Class ' + esc(className) + ' &middot; Session ' + esc(session) + (gazetteTerm ? ' &middot; ' + esc(gazetteTerm) : ''))}
     <table>
       <tr><th class="mono">Roll No</th><th>Name</th><th>Father's Name</th>${subjectOrder.map(s=>`<th>${esc(s)}</th>`).join('')}<th class="mono">Total</th><th class="mono">%</th><th>Grade</th><th class="mono">Position</th><th>Pass/Fail</th></tr>
       ${bodyRows}
@@ -2118,7 +2157,7 @@ function adminViewSlip(enrollmentId){
       <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
       ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${subjectPasses(s)?'var(--success)':'var(--danger)'};font-weight:700;">${subjectPasses(s)?'Pass':'Fail'}</td></tr>`).join('')}
     </table>
-    <p style="margin-top:10px;font-weight:700;">Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs))}</span></p>`;
+    <p style="margin-top:10px;font-weight:700;">${rec.term?'Term: <span class="mono">'+esc(rec.term)+'</span> &middot; ':''}Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs, rec.term))}</span></p>`;
   }
   const out = document.getElementById('adminSlipOutput');
   out.innerHTML = `
@@ -2459,7 +2498,7 @@ function renderAdminPanel(){
 
     <div class="admin-block">
       <h3>Enter Result for a Session (Year)</h3>
-      <p class="note-inline" style="margin:-6px 0 14px;">Select session and class, then pick the student from the enrolled list &mdash; subjects for that class fill in automatically. Editing an existing result just updates it; old sessions are never overwritten.</p>
+      <p class="note-inline" style="margin:-6px 0 14px;">Select session and class, then pick the student from the enrolled list &mdash; subjects for that class fill in automatically. Editing an existing result just updates it; old sessions are never overwritten. Term batayega ke agar koi subject mein fail ho to reappear kab hoga: 1st Term mein fail ho to 2nd Term mein reappear, 2nd Term mein fail ho to 3rd Term mein reappear, aur 3rd Term mein fail ho to result ke 10 din ke andar dobara paper de sakta hai.</p>
       <form id="resultForm">
         <div class="row-2">
           <div class="field"><label>Session / Year</label><input required id="rsSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderResultStudentPicker()"></div>
@@ -2467,6 +2506,16 @@ function renderAdminPanel(){
             <select required id="rsClass" onchange="renderResultStudentPicker()">${classOptionsHTML()}</select>
           </div>
         </div>
+        <div class="field"><label>Term</label>
+          <select id="rsTerm" onchange="toggleRsTermOther()">
+            <option value="1st Term">1st Term</option>
+            <option value="2nd Term">2nd Term</option>
+            <option value="3rd Term">3rd Term</option>
+            <option value="Annual">Annual</option>
+            <option value="__other__">Other (specify)</option>
+          </select>
+        </div>
+        <div class="field" id="rsTermOtherWrap" style="display:none;"><label>Specify Term</label><input id="rsTermOther" placeholder="e.g. Mid Term"></div>
         <div class="field"><label>Student</label>
           <select required id="rsStudent" onchange="renderResultSubjectPicker()">
             <option value="">Select class and session first</option>
@@ -2486,7 +2535,7 @@ function renderAdminPanel(){
         const filtered = DB.results.filter(r=> resultsAdminSessionFilter==='All' || r.session===resultsAdminSessionFilter);
         return `<div class="filter-chips">${sessions.map(s=>`<button type="button" class="chip ${s===resultsAdminSessionFilter?'active':''}" onclick="resultsAdminSessionFilter='${esc(s)}'; renderAdminPanel();">${s==='All'?'All Sessions':esc(s)}</button>`).join('')}</div>
         ${filtered.length ? `<table style="margin-top:14px;">
-        <tr><th class="mono">Roll No</th><th>Name</th><th class="mono">Session</th><th>Class</th><th class="mono">%</th><th class="mono">Position</th><th></th></tr>
+        <tr><th class="mono">Roll No</th><th>Name</th><th class="mono">Session</th><th>Class</th><th>Term</th><th class="mono">%</th><th class="mono">Position</th><th></th></tr>
         ${[...filtered].sort((a,b)=>(b.session||'').localeCompare(a.session||'')).map(r=>{
           const en = DB.enrollments.find(e=>e.rollNo===r.rollNo && e.session===r.session);
           const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
@@ -2494,7 +2543,7 @@ function renderAdminPanel(){
           const outOf = (r.subjects||[]).reduce((a,s)=>a+Number(s.total||0),0);
           const pct = outOf ? ((total/outOf)*100).toFixed(1) : '-';
           const posInfo = getPositionFor(r.rollNo, r.className, r.session);
-          return `<tr data-roll="${esc(r.rollNo)}" data-session="${esc(r.session)}"><td class="mono">${esc(r.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td class="mono">${pct}${pct!=='-'?'%':''}</td><td class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteResult('${esc(r.id)}')">Remove</button></td></tr>`;
+          return `<tr data-roll="${esc(r.rollNo)}" data-session="${esc(r.session)}"><td class="mono">${esc(r.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td>${esc(r.term||'-')}</td><td class="mono">${pct}${pct!=='-'?'%':''}</td><td class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteResult('${esc(r.id)}')">Remove</button></td></tr>`;
         }).join('')}
       </table>` : '<div class="empty" style="margin-top:10px;">No results for this session.</div>'}`;
       })()}
@@ -3061,7 +3110,9 @@ function renderAdminPanel(){
       });
     });
     const existingIdx = DB.results.findIndex(r=>r.rollNo===rollNo && r.session===session);
-    const record = { id: existingIdx>=0 ? DB.results[existingIdx].id : uid(), rollNo, session, className, subjects };
+    const termSel = document.getElementById('rsTerm').value;
+    const term = termSel==='__other__' ? document.getElementById('rsTermOther').value.trim() : termSel;
+    const record = { id: existingIdx>=0 ? DB.results[existingIdx].id : uid(), rollNo, session, className, subjects, term };
     if(existingIdx>=0) DB.results[existingIdx] = record; else DB.results.push(record);
     await setData('results', DB.results);
     renderAdminPanel();
@@ -3463,6 +3514,11 @@ function renderResultStudentPicker(){
   }).join('');
   document.getElementById('resultSubjectPicker').innerHTML = '';
 }
+function toggleRsTermOther(){
+  const sel = document.getElementById('rsTerm');
+  const wrap = document.getElementById('rsTermOtherWrap');
+  if(wrap) wrap.style.display = sel.value==='__other__' ? '' : 'none';
+}
 function renderResultSubjectPicker(){
   const className = document.getElementById('rsClass').value;
   const session = document.getElementById('rsSession').value.trim();
@@ -3480,6 +3536,20 @@ function renderResultSubjectPicker(){
     return;
   }
   const existing = DB.results.find(r=>r.rollNo===rollNo && r.session===session);
+  const termSel = document.getElementById('rsTerm');
+  if(termSel){
+    const savedTerm = (existing && existing.term) || '';
+    const knownTerms = ['1st Term','2nd Term','3rd Term','Annual'];
+    if(knownTerms.includes(savedTerm) || !savedTerm){
+      termSel.value = savedTerm || '1st Term';
+      toggleRsTermOther();
+    } else {
+      termSel.value = '__other__';
+      toggleRsTermOther();
+      const otherInput = document.getElementById('rsTermOther');
+      if(otherInput) otherInput.value = savedTerm;
+    }
+  }
   const existingMap = {};
   (existing && existing.subjects || []).forEach(s=>{ existingMap[s.subject] = s; });
   wrap.innerHTML = `<h4 style="margin:14px 0 8px;font-size:14px;">Subject Marks</h4>` + subs.map(s=>{
