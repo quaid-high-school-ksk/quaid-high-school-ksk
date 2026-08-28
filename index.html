@@ -1222,6 +1222,14 @@ function isPassing(subs){
   if(!subs || !subs.length) return false;
   return subs.every(s=>subjectPasses(s));
 }
+// Returns ", in Math, Islamic Studies" etc. listing every subject a student
+// failed, so "FAIL" always says which subject(s) instead of just "FAIL".
+// Empty string when the student passed (or there are no subjects).
+function failingSubjectsSuffix(subs){
+  if(!subs || !subs.length) return '';
+  const failed = subs.filter(s=>!subjectPasses(s)).map(s=>s.subject);
+  return failed.length ? ' in ' + failed.join(', ') : '';
+}
 // Ranks every student in a class+session by overall percentage (standard
 // competition ranking: tied percentages share the same position).
 function computeClassRanking(className, session){
@@ -1341,7 +1349,7 @@ function lookupResult(){
       <p style="margin-top:14px;font-weight:700;">Total: <span class="mono">${total} / ${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span></p>
       <p style="margin-top:6px;font-weight:700;display:flex;gap:16px;flex-wrap:wrap;">
         <span>Position: <span class="mono">${posInfo ? posInfo.position+' of '+posInfo.outOf : '-'}</span></span>
-        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'}</span>
+        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs))}</span>
       </p>
     </div>
     <button class="tag-btn ghost" style="margin-bottom:20px;" onclick="printHTML(document.getElementById('resultCard-${idx}').outerHTML)">Print This Result</button>`;
@@ -1848,7 +1856,7 @@ function renderGazette(){
       <td class="mono">${pct}%</td>
       <td><span class="grade-pill" style="font-size:11px;">${computeGrade(pct)}</span></td>
       <td class="mono">${posInfo ? posInfo.position : '-'}</td>
-      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${passResult?'PASS':'FAIL'}</td>
+      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(r.subs))}</td>
     </tr>`;
   }).join('');
 
@@ -2110,7 +2118,7 @@ function adminViewSlip(enrollmentId){
       <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
       ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${subjectPasses(s)?'var(--success)':'var(--danger)'};font-weight:700;">${subjectPasses(s)?'Pass':'Fail'}</td></tr>`).join('')}
     </table>
-    <p style="margin-top:10px;font-weight:700;">Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'}</span></p>`;
+    <p style="margin-top:10px;font-weight:700;">Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs))}</span></p>`;
   }
   const out = document.getElementById('adminSlipOutput');
   out.innerHTML = `
