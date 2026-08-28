@@ -1219,6 +1219,7 @@ function computeGrade(pct){
   if(pct>=60) return 'C'; if(pct>=50) return 'D'; if(pct>=33) return 'E'; return 'F';
 }
 function subjectPasses(s){
+  if(s.absent) return false;
   const total = Number(s.total||0);
   if(total<=0) return true;
   return (Number(s.obtained||0)/total)*100 >= PASS_PERCENT;
@@ -1231,8 +1232,10 @@ function isPassing(subs){
 // failed, plus a reappear note based on the term: fail in 1st Term means
 // reappear in 2nd Term, fail in 2nd Term means reappear in 3rd Term, and
 // fail in 3rd Term means the student can reappear for the paper within 10
-// days of this result. Empty string when the student passed (or there are
-// no subjects).
+// days of this result. Subjects marked Absent/Not Appeared are listed
+// separately (no reappear note, since that's a scheduling matter, not a
+// failed attempt). Empty string when the student passed (or there are no
+// subjects).
 function termReappearNote(term){
   if(term==='1st Term') return ' (Reappear in 2nd Term)';
   if(term==='2nd Term') return ' (Reappear in 3rd Term)';
@@ -1241,8 +1244,25 @@ function termReappearNote(term){
 }
 function failingSubjectsSuffix(subs, term){
   if(!subs || !subs.length) return '';
-  const failed = subs.filter(s=>!subjectPasses(s)).map(s=>s.subject);
-  return failed.length ? ' in ' + failed.join(', ') + termReappearNote(term) : '';
+  const failed = subs.filter(s=>!s.absent && !subjectPasses(s)).map(s=>s.subject);
+  const absent = subs.filter(s=>s.absent).map(s=>s.subject);
+  const parts = [];
+  if(failed.length) parts.push('in ' + failed.join(', ') + termReappearNote(term));
+  if(absent.length) parts.push('Not Appeared in ' + absent.join(', '));
+  return parts.length ? ' ' + parts.join(' &middot; ') : '';
+}
+// Full overall-result text: "PASS", "FAIL in Math (Reappear in 2nd Term)",
+// "Not Appeared in Islamic Studies", or a combination of both joined
+// together, whichever applies. Use this instead of manually prefixing
+// "FAIL" so a purely-absent case doesn't read as "FAIL Not Appeared in X".
+function overallResultLabel(subs, term){
+  if(!subs || !subs.length || isPassing(subs)) return 'PASS';
+  const failed = subs.filter(s=>!s.absent && !subjectPasses(s)).map(s=>s.subject);
+  const absent = subs.filter(s=>s.absent).map(s=>s.subject);
+  const parts = [];
+  if(failed.length) parts.push('FAIL in ' + failed.join(', ') + termReappearNote(term));
+  if(absent.length) parts.push('Not Appeared in ' + absent.join(', '));
+  return parts.join(' &middot; ');
 }
 // Ranks every student in a class+session by overall percentage (standard
 // competition ranking: tied percentages share the same position).
@@ -1342,12 +1362,12 @@ function renderResultCards(matches){
       </div>
       <table>
         <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
-        ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${subjectPasses(s)?'var(--success)':'var(--danger)'};font-weight:700;">${subjectPasses(s)?'Pass':'Fail'}</td></tr>`).join('')}
+        ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(subjectPasses(s)?'Pass':'Fail')}</td></tr>`).join('')}
       </table>
       <p style="margin-top:14px;font-weight:700;">Total: <span class="mono">${total} / ${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span></p>
       <p style="margin-top:6px;font-weight:700;display:flex;gap:16px;flex-wrap:wrap;">
         <span>Position: <span class="mono">${posInfo ? posInfo.position+' of '+posInfo.outOf : '-'}</span></span>
-        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs, m.term))}</span>
+        <span style="color:${passResult?'var(--success)':'var(--danger)'};">${esc(overallResultLabel(subs, m.term))}</span>
       </p>
     </div>
     <button class="tag-btn ghost" style="margin-bottom:20px;" onclick="printHTML(document.getElementById('resultCard-${idx}').outerHTML)">Print This Result</button>`;
@@ -1895,7 +1915,7 @@ function renderGazette(){
       <td class="mono">${pct}%</td>
       <td><span class="grade-pill" style="font-size:11px;">${computeGrade(pct)}</span></td>
       <td class="mono">${posInfo ? posInfo.position : '-'}</td>
-      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(r.subs, r.term))}</td>
+      <td style="color:${passResult?'var(--success)':'var(--danger)'};font-weight:700;">${esc(overallResultLabel(r.subs, r.term))}</td>
     </tr>`;
   }).join('');
 
@@ -2155,9 +2175,9 @@ function adminViewSlip(enrollmentId){
     const passResult = isPassing(subs);
     resultHTML = `<table>
       <tr><th>Subject</th><th class="mono">Obtained</th><th class="mono">Total</th><th>Result</th></tr>
-      ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${subjectPasses(s)?'var(--success)':'var(--danger)'};font-weight:700;">${subjectPasses(s)?'Pass':'Fail'}</td></tr>`).join('')}
+      ${subs.map(s=>`<tr><td>${esc(s.subject)}</td><td class="mono">${s.absent?'-':esc(s.obtained)}</td><td class="mono">${esc(s.total)}</td><td style="color:${s.absent?'var(--gold-dark)':(subjectPasses(s)?'var(--success)':'var(--danger)')};font-weight:700;">${s.absent?'Absent':(subjectPasses(s)?'Pass':'Fail')}</td></tr>`).join('')}
     </table>
-    <p style="margin-top:10px;font-weight:700;">${rec.term?'Term: <span class="mono">'+esc(rec.term)+'</span> &middot; ':''}Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${passResult?'PASS':'FAIL'+esc(failingSubjectsSuffix(subs, rec.term))}</span></p>`;
+    <p style="margin-top:10px;font-weight:700;">${rec.term?'Term: <span class="mono">'+esc(rec.term)+'</span> &middot; ':''}Total: <span class="mono">${total}/${outOf}</span> &middot; Percentage: <span class="mono">${pct}%</span> &middot; Grade: <span class="mono">${computeGrade(pct)}</span> &middot; Position: <span class="mono">${posInfo?posInfo.position+' of '+posInfo.outOf:'-'}</span> &middot; <span style="color:${passResult?'var(--success)':'var(--danger)'};">${esc(overallResultLabel(subs, rec.term))}</span></p>`;
   }
   const out = document.getElementById('adminSlipOutput');
   out.innerHTML = `
@@ -3103,10 +3123,12 @@ function renderAdminPanel(){
     rows.forEach(row=>{
       const checked = row.querySelector('.rs-subject-check').checked;
       if(!checked) return;
+      const absent = row.querySelector('.rs-absent').checked;
       subjects.push({
         subject: row.dataset.subject,
-        obtained: row.querySelector('.rs-obtained').value,
-        total: row.querySelector('.rs-total').value
+        obtained: absent ? 0 : row.querySelector('.rs-obtained').value,
+        total: row.querySelector('.rs-total').value,
+        absent
       });
     });
     const existingIdx = DB.results.findIndex(r=>r.rollNo===rollNo && r.session===session);
@@ -3561,12 +3583,21 @@ function renderResultSubjectPicker(){
       </label>
       <div class="ds-subject-fields" style="display:${ex?'block':'none'};">
         <div class="row-2">
-          <div class="field"><label>Obtained</label><input type="number" class="rs-obtained" value="${ex?esc(ex.obtained):''}"></div>
+          <div class="field"><label>Obtained</label><input type="number" class="rs-obtained" value="${ex&&!ex.absent?esc(ex.obtained):''}" ${ex&&ex.absent?'disabled':''}></div>
           <div class="field"><label>Total</label><input type="number" class="rs-total" value="${ex?esc(ex.total):''}"></div>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:6px;">
+          <input type="checkbox" class="rs-absent" ${ex&&ex.absent?'checked':''} onchange="toggleRsAbsent(this)" style="width:auto;"> Absent / Not Appeared in this paper
+        </label>
       </div>
     </div>`;
   }).join('');
+}
+function toggleRsAbsent(checkbox){
+  const row = checkbox.closest('.ds-subject-row');
+  const obtainedInput = row.querySelector('.rs-obtained');
+  if(checkbox.checked){ obtainedInput.value = ''; obtainedInput.disabled = true; }
+  else { obtainedInput.disabled = false; }
 }
 
 function handlePhotoUpload(e){
