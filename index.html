@@ -899,7 +899,7 @@ function printHTML(html){
   setTimeout(()=>{ legitimatePrintInProgress = false; }, 1000);
 }
 
-let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[] };
+let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], subjectTotalMarks:{} };
 let calSessionFilter = 'All';
 let isAdmin = false;
 let dsClassFilter = 'All';
@@ -919,6 +919,7 @@ let promoteFromClass = 'One';
 let promoteToSession = String(new Date().getFullYear()+1);
 let promoteToClass = 'Two';
 let promoteExcluded = new Set(); // enrollment ids unchecked by admin before promoting
+let lastUsedResultTerm = '1st Term'; // remembers the last Term picked while entering results, so switching students in the same sitting doesn't reset it
 let dsSessionFilter = 'All';
 let resultsAdminSessionFilter = 'All';
 let attendanceAdminSessionFilter = 'All';
@@ -946,6 +947,7 @@ async function loadAll(){
   DB.results       = await getData('results', []);
   DB.enrollments   = await getData('enrollments', []);
   DB.classSubjects = await getData('classSubjects', DEFAULT_CLASS_SUBJECTS);
+  DB.subjectTotalMarks = await getData('subjectTotalMarks', {});
   DB.aboutUs       = await getData('aboutUs', DEFAULT_ABOUT_US);
   DB.complaints    = await getData('complaints', []);
   DB.academicCalendar = await getData('academicCalendar', []);
@@ -1255,7 +1257,8 @@ function failingSubjectsSuffix(subs, term){
 // together, whichever applies. Use this instead of manually prefixing
 // "FAIL" so a purely-absent case doesn't read as "FAIL Not Appeared in X".
 function overallResultLabel(subs, term){
-  if(!subs || !subs.length || isPassing(subs)) return 'PASS';
+  if(!subs || !subs.length) return 'PASS';
+  if(isPassing(subs)) return subs.some(s=>s.starPass) ? 'PASS*' : 'PASS';
   const failed = subs.filter(s=>!s.absent && !subjectPasses(s)).map(s=>s.subject);
   const absent = subs.filter(s=>s.absent).map(s=>s.subject);
   const parts = [];
@@ -1886,12 +1889,10 @@ function populateGazetteFilters(){
   const sel = document.getElementById('gzSession');
   sel.innerHTML = '<option value="">Select session</option>' + sessions.map(s=>`<option>${esc(s)}</option>`).join('');
 }
-function renderGazette(){
-  const session = document.getElementById('gzSession').value;
-  const className = document.getElementById('gzClass').value;
-  const out = document.getElementById('gazetteOutput');
-  if(!session || !className){ out.innerHTML = '<div class="msg-err">Select both a session and a class.</div>'; return; }
-
+// Builds one class's gazette table for a session. Returns null if there are
+// no released results for that class/session yet. Shared by the on-screen
+// single-class view and the "Download All Classes" combined document.
+function buildGazetteHTML(session, className){
   const released = DB.enrollments.filter(en=>en.session===session && en.className===className && en.resultEnabled);
   const rows = released.map(en=>{
     const stu = DB.students.find(s=>s.id===en.studentId) || {};
@@ -1899,10 +1900,7 @@ function renderGazette(){
     return { rollNo: en.rollNo, name: stu.name || '-', fatherName: stu.fatherName || '-', subs: (rec && rec.subjects) || [], term: rec ? (rec.term||'') : '' };
   }).filter(r=>r.subs.length>0);
 
-  if(rows.length===0){
-    out.innerHTML = '<div class="empty">No released results for this class and session yet. Results appear here automatically as soon as Result Access is turned on for each student.</div>';
-    return;
-  }
+  if(rows.length===0) return null;
   const gazetteTerm = rows.find(r=>r.term)?.term || '';
 
   const subjectOrder = [];
@@ -1913,9 +1911,11 @@ function renderGazette(){
     return (a.rollNo||'').localeCompare(b.rollNo||'');
   });
 
+  const hasStarPass = rows.some(r=>r.subs.some(s=>s.starPass));
+
   const bodyRows = rows.map(r=>{
     const marksBySubject = {};
-    r.subs.forEach(s=>{ marksBySubject[s.subject] = s.obtained; });
+    r.subs.forEach(s=>{ marksBySubject[s.subject] = s.absent ? 'Abs' : (s.starPass ? s.obtained+'*' : s.obtained); });
     const total = r.subs.reduce((a,s)=>a+Number(s.obtained||0),0);
     const outOf = r.subs.reduce((a,s)=>a+Number(s.total||0),0);
     const pct = outOf ? ((total/outOf)*100).toFixed(1) : '0.0';
@@ -1934,14 +1934,48 @@ function renderGazette(){
     </tr>`;
   }).join('');
 
-  out.innerHTML = `<div id="gazettePrintable">
+  const html = `<div class="gazette-block">
     ${schoolBrandHTML('Result Gazette &mdash; Class ' + esc(className) + ' &middot; Session ' + esc(session) + (gazetteTerm ? ' &middot; ' + esc(gazetteTerm) : ''))}
     <table>
       <tr><th class="mono">Roll No</th><th>Name</th><th>Father's Name</th>${subjectOrder.map(s=>`<th>${esc(s)}</th>`).join('')}<th class="mono">Total</th><th class="mono">%</th><th>Grade</th><th class="mono">Position</th><th>Pass/Fail</th></tr>
       ${bodyRows}
     </table>
-  </div>
-  <button class="tag-btn ghost" style="margin-top:14px;" onclick="printHTML(document.getElementById('gazettePrintable').outerHTML)">Print Gazette</button>`;
+    ${hasStarPass ? '<p class="note-inline" style="margin-top:8px;">* Grace marks awarded to pass one or more subjects.</p>' : ''}
+  </div>`;
+  return { html, hasStarPass };
+}
+function renderGazette(){
+  const session = document.getElementById('gzSession').value;
+  const className = document.getElementById('gzClass').value;
+  const out = document.getElementById('gazetteOutput');
+  if(!session || !className){ out.innerHTML = '<div class="msg-err">Select both a session and a class.</div>'; return; }
+
+  const built = buildGazetteHTML(session, className);
+  if(!built){
+    out.innerHTML = '<div class="empty">No released results for this class and session yet. Results appear here automatically as soon as Result Access is turned on for each student.</div>';
+    return;
+  }
+
+  out.innerHTML = `<div id="gazettePrintable">${built.html}</div>
+  <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="tag-btn ghost" onclick="printHTML(document.getElementById('gazettePrintable').outerHTML)">Print Gazette</button>
+    <button class="tag-btn ghost" onclick="downloadAllClassesGazette()">Download All Classes (This Session)</button>
+  </div>`;
+}
+// Combines every class's gazette for the selected session into one printable
+// document (each class starting on its own page), so the office can print
+// or "Save as PDF" the whole session's results in one go instead of one
+// class at a time.
+function downloadAllClassesGazette(){
+  const session = document.getElementById('gzSession').value;
+  if(!session){ alert('Pehle Session select karein.'); return; }
+  const parts = [];
+  CLASS_LIST.forEach(c=>{
+    const built = buildGazetteHTML(session, c);
+    if(built) parts.push(`<div style="${parts.length ? 'page-break-before:always;' : ''}">${built.html}</div>`);
+  });
+  if(!parts.length){ alert('Is session ke liye kisi bhi class ka result nahi mila.'); return; }
+  printHTML(parts.join(''));
 }
 
 /* ---------------- STUDENT PORTAL (B-FORM LOGIN) ---------------- */
@@ -2638,6 +2672,29 @@ function renderAdminPanel(){
       </table>` : ''}
     </div>
 
+    <div class="admin-block" style="border:2px solid var(--gold);">
+      <h3>Set Total Marks (Class + Term + Subject)</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Har paper ke liye Total Marks ek hi baar yahan set kar dein &mdash; us class ke us term ke sab bachon ke result mein wahi Total khud bhar jayega, aap sirf har student ke Obtained marks likhein.</p>
+      <div class="row-2" style="max-width:600px;">
+        <div class="field"><label>Session / Year</label><input id="stmSession" value="${new Date().getFullYear()}" onchange="renderSetTotalMarks()" placeholder="e.g. 2026"></div>
+        <div class="field"><label>Class</label>
+          <select id="stmClass" onchange="renderSetTotalMarks()">${classOptionsHTML()}</select>
+        </div>
+      </div>
+      <div class="field" style="max-width:300px;">
+        <label>Term</label>
+        <select id="stmTerm" onchange="toggleStmTermOther(); renderSetTotalMarks();">
+          <option value="1st Term">1st Term</option>
+          <option value="2nd Term">2nd Term</option>
+          <option value="3rd Term">3rd Term</option>
+          <option value="Annual">Annual</option>
+          <option value="__other__">Other (specify)</option>
+        </select>
+      </div>
+      <div class="field" id="stmTermOtherWrap" style="display:none;max-width:300px;"><label>Specify Term</label><input id="stmTermOther" oninput="renderSetTotalMarks()" placeholder="e.g. Mid Term"></div>
+      <div id="setTotalMarksPicker" style="margin-top:10px;"></div>
+    </div>
+
     <div class="admin-block">
       <h3>Enter Result for a Session (Year)</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Select session and class, then pick the student from the enrolled list &mdash; subjects for that class fill in automatically. Editing an existing result just updates it; old sessions are never overwritten. Term batayega ke agar koi subject mein fail ho to reappear kab hoga: 1st Term mein fail ho to 2nd Term mein reappear, 2nd Term mein fail ho to 3rd Term mein reappear, aur 3rd Term mein fail ho to result ke 10 din ke andar dobara paper de sakta hai.</p>
@@ -2649,7 +2706,7 @@ function renderAdminPanel(){
           </div>
         </div>
         <div class="field"><label>Term</label>
-          <select id="rsTerm" onchange="toggleRsTermOther()">
+          <select id="rsTerm" onchange="rememberResultTerm(); toggleRsTermOther(); renderResultSubjectPicker();">
             <option value="1st Term">1st Term</option>
             <option value="2nd Term">2nd Term</option>
             <option value="3rd Term">3rd Term</option>
@@ -2657,7 +2714,7 @@ function renderAdminPanel(){
             <option value="__other__">Other (specify)</option>
           </select>
         </div>
-        <div class="field" id="rsTermOtherWrap" style="display:none;"><label>Specify Term</label><input id="rsTermOther" placeholder="e.g. Mid Term"></div>
+        <div class="field" id="rsTermOtherWrap" style="display:none;"><label>Specify Term</label><input id="rsTermOther" oninput="rememberResultTerm(); renderResultSubjectPicker();" placeholder="e.g. Mid Term"></div>
         <div class="field"><label>Student</label>
           <select required id="rsStudent" onchange="renderResultSubjectPicker()">
             <option value="">Select class and session first</option>
@@ -3165,6 +3222,7 @@ function renderAdminPanel(){
   `;
 
   renderNoAttendanceList();
+  renderSetTotalMarks();
 
   document.getElementById('aboutUsForm').addEventListener('submit', async e=>{
     e.preventDefault();
@@ -3638,6 +3696,51 @@ function renderFeeStudentPendingDues(){
     : `<p class="note-inline" style="margin:-4px 0 14px;color:var(--success);">${esc(stu?stu.name:'Ye student')} ki koi pending dues nahi hain.</p>`;
 }
 
+function toggleStmTermOther(){
+  const sel = document.getElementById('stmTerm');
+  const wrap = document.getElementById('stmTermOtherWrap');
+  if(wrap) wrap.style.display = sel.value==='__other__' ? '' : 'none';
+}
+// Key used to store/retrieve a class+term+subject's total marks, shared by
+// every student in that class/session/term so admin only enters it once.
+function totalMarksKey(session, className, term, subject){
+  return `${session}|${className}|${term}|${subject}`;
+}
+function renderSetTotalMarks(){
+  const session = document.getElementById('stmSession').value.trim();
+  const className = document.getElementById('stmClass').value;
+  const termSel = document.getElementById('stmTerm').value;
+  const term = termSel==='__other__' ? document.getElementById('stmTermOther').value.trim() : termSel;
+  const wrap = document.getElementById('setTotalMarksPicker');
+  if(!session || !className || !term){ wrap.innerHTML = '<p class="note-inline">Session, Class, aur Term teeno bharein.</p>'; return; }
+  const subs = Array.from(new Set([...MANDATORY_SUBJECTS, ...(DB.classSubjects[className] || [])]));
+  if(!subs.length){ wrap.innerHTML = '<p class="note-inline">Is class ke liye abhi subjects set nahi hain &mdash; upar "Manage Subjects by Class" mein add karein.</p>'; return; }
+  wrap.innerHTML = `<table>
+    <tr><th>Subject</th><th class="mono">Total Marks</th></tr>
+    ${subs.map(s=>{
+      const key = totalMarksKey(session, className, term, s);
+      const val = DB.subjectTotalMarks[key];
+      return `<tr><td>${esc(s)}</td><td><input type="number" class="stm-total-input" data-subject="${esc(s)}" value="${val!=null?esc(val):''}" placeholder="e.g. 100" style="max-width:120px;"></td></tr>`;
+    }).join('')}
+  </table>
+  <button type="button" class="btn-gold" style="margin-top:12px;" onclick="saveTotalMarks()">Save Total Marks for This Class/Term</button>
+  <div id="stmSaveMsg" style="margin-top:8px;"></div>`;
+}
+async function saveTotalMarks(){
+  const session = document.getElementById('stmSession').value.trim();
+  const className = document.getElementById('stmClass').value;
+  const termSel = document.getElementById('stmTerm').value;
+  const term = termSel==='__other__' ? document.getElementById('stmTermOther').value.trim() : termSel;
+  document.querySelectorAll('.stm-total-input').forEach(inp=>{
+    const key = totalMarksKey(session, className, term, inp.dataset.subject);
+    const val = inp.value.trim();
+    if(val) DB.subjectTotalMarks[key] = Number(val);
+    else delete DB.subjectTotalMarks[key];
+  });
+  await setData('subjectTotalMarks', DB.subjectTotalMarks);
+  const msg = document.getElementById('stmSaveMsg');
+  if(msg) msg.innerHTML = '<p class="msg-ok">Saved! Ab is class/term ke har student ka result likhte waqt Total khud bhar jayega.</p>';
+}
 function renderResultStudentPicker(){
   const session = document.getElementById('rsSession').value.trim();
   const className = document.getElementById('rsClass').value;
@@ -3658,6 +3761,15 @@ function renderResultStudentPicker(){
     return `<option value="${esc(en.rollNo)}">${esc(en.rollNo)} &mdash; ${esc(stu?stu.name:'-')}</option>`;
   }).join('');
   document.getElementById('resultSubjectPicker').innerHTML = '';
+}
+// Saves whichever Term the admin just picked (or typed, for "Other") so
+// that switching to the next student in the same sitting keeps that same
+// term instead of resetting back to "1st Term" every time.
+function rememberResultTerm(){
+  const sel = document.getElementById('rsTerm');
+  if(!sel) return;
+  const term = sel.value==='__other__' ? document.getElementById('rsTermOther').value.trim() : sel.value;
+  if(term) lastUsedResultTerm = term;
 }
 function toggleRsTermOther(){
   const sel = document.getElementById('rsTerm');
@@ -3683,22 +3795,29 @@ function renderResultSubjectPicker(){
   const existing = DB.results.find(r=>r.rollNo===rollNo && r.session===session);
   const termSel = document.getElementById('rsTerm');
   if(termSel){
-    const savedTerm = (existing && existing.term) || '';
+    // If this student already has a saved result, show its term (so editing
+    // reflects what was actually saved). Otherwise, default to whichever
+    // term was last used in this sitting, so entering results for a whole
+    // class one student after another doesn't reset the term each time.
+    const fallbackTerm = (existing && existing.term) || lastUsedResultTerm || '1st Term';
     const knownTerms = ['1st Term','2nd Term','3rd Term','Annual'];
-    if(knownTerms.includes(savedTerm) || !savedTerm){
-      termSel.value = savedTerm || '1st Term';
+    if(knownTerms.includes(fallbackTerm)){
+      termSel.value = fallbackTerm;
       toggleRsTermOther();
     } else {
       termSel.value = '__other__';
       toggleRsTermOther();
       const otherInput = document.getElementById('rsTermOther');
-      if(otherInput) otherInput.value = savedTerm;
+      if(otherInput) otherInput.value = fallbackTerm;
     }
   }
   const existingMap = {};
   (existing && existing.subjects || []).forEach(s=>{ existingMap[s.subject] = s; });
+  const effectiveTerm = termSel ? (termSel.value==='__other__' ? (document.getElementById('rsTermOther').value.trim()) : termSel.value) : '';
   wrap.innerHTML = `<h4 style="margin:14px 0 8px;font-size:14px;">Subject Marks</h4>` + subs.map(s=>{
     const ex = existingMap[s];
+    const templateTotal = DB.subjectTotalMarks[totalMarksKey(session, className, effectiveTerm, s)];
+    const totalValue = ex ? ex.total : (templateTotal!=null ? templateTotal : '');
     return `
     <div class="ds-subject-row" data-subject="${esc(s)}">
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
@@ -3707,7 +3826,7 @@ function renderResultSubjectPicker(){
       <div class="ds-subject-fields" style="display:${ex?'block':'none'};">
         <div class="row-2">
           <div class="field"><label>Obtained</label><input type="number" class="rs-obtained" value="${ex&&!ex.absent?esc(ex.obtained):''}" ${ex&&ex.absent?'disabled':''}></div>
-          <div class="field"><label>Total</label><input type="number" class="rs-total" value="${ex?esc(ex.total):''}"></div>
+          <div class="field"><label>Total</label><input type="number" class="rs-total" value="${esc(totalValue)}"></div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:6px;">
           <input type="checkbox" class="rs-absent" ${ex&&ex.absent?'checked':''} onchange="toggleRsAbsent(this)" style="width:auto;"> Absent / Not Appeared in this paper
