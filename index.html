@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -1958,9 +1959,67 @@ function renderGazette(){
 
   out.innerHTML = `<div id="gazettePrintable">${built.html}</div>
   <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="btn-gold" onclick="downloadGazettePdf()">Download Gazette (PDF)</button>
     <button class="tag-btn ghost" onclick="printHTML(document.getElementById('gazettePrintable').outerHTML)">Print Gazette</button>
-    <button class="tag-btn ghost" onclick="downloadAllClassesGazette()">Download All Classes (This Session)</button>
+    <button class="btn-gold" onclick="downloadAllClassesGazettePdf()">Download All Classes (PDF)</button>
+    <button class="tag-btn ghost" onclick="downloadAllClassesGazette()">Print All Classes</button>
   </div>`;
+}
+// One-click PDF download of the single-class gazette currently shown &mdash;
+// no print dialog, the file just downloads.
+async function downloadGazettePdf(){
+  const node = document.getElementById('gazettePrintable');
+  if(!node){ alert('Pehle ek class ki gazette generate karein.'); return; }
+  await downloadNodeAsPdf(node, 'result-gazette.pdf');
+}
+// Renders an HTML string off-screen and captures it with html2canvas, used
+// by the PDF downloaders below so they don't depend on the hidden #printArea
+// (which is only meant for the browser's native print dialog).
+async function renderHtmlToCanvas(html, width){
+  const temp = document.createElement('div');
+  temp.style.position = 'fixed';
+  temp.style.left = '-99999px';
+  temp.style.top = '0';
+  temp.style.width = (width||1000)+'px';
+  temp.style.background = '#ffffff';
+  temp.innerHTML = html;
+  document.body.appendChild(temp);
+  const canvas = await html2canvas(temp, { scale:2, backgroundColor:'#ffffff' });
+  document.body.removeChild(temp);
+  return canvas;
+}
+// Captures a live DOM node (already on the page) as a canvas and saves it as
+// a single-page PDF sized exactly to that content, so nothing gets cropped.
+async function downloadNodeAsPdf(node, filename){
+  const canvas = await html2canvas(node, { scale:2, backgroundColor:'#ffffff' });
+  savePdfFromCanvas(canvas, filename);
+}
+function savePdfFromCanvas(canvas, filename, pdf){
+  const pxToPt = 0.75; // 1px at 96dpi = 0.75pt
+  const w = canvas.width*pxToPt, h = canvas.height*pxToPt;
+  const { jsPDF } = window.jspdf;
+  if(pdf){
+    pdf.addPage([w,h], w>h?'l':'p');
+  } else {
+    pdf = new jsPDF({ orientation: w>h?'l':'p', unit:'pt', format:[w,h] });
+  }
+  pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, w, h);
+  if(filename) pdf.save(filename);
+  return pdf;
+}
+// One-click PDF download of every class's gazette for the selected session,
+// combined into a single multi-page PDF file (one class per page).
+async function downloadAllClassesGazettePdf(){
+  const session = document.getElementById('gzSession').value;
+  if(!session){ alert('Pehle Session select karein.'); return; }
+  const classesWithData = CLASS_LIST.map(c=>({ c, built: buildGazetteHTML(session, c) })).filter(x=>x.built);
+  if(!classesWithData.length){ alert('Is session ke liye kisi bhi class ka result nahi mila.'); return; }
+  let pdf = null;
+  for(const { built } of classesWithData){
+    const canvas = await renderHtmlToCanvas(built.html, 1100);
+    pdf = savePdfFromCanvas(canvas, null, pdf);
+  }
+  pdf.save('result-gazette-all-classes.pdf');
 }
 // Combines every class's gazette for the selected session into one printable
 // document (each class starting on its own page), so the office can print
