@@ -263,7 +263,7 @@
     <button type="button" class="nav-dropdown-toggle">Academics <span class="caret">&#9662;</span></button>
     <div class="nav-dropdown-menu">
       <button data-tab="datesheet">Date Sheet</button>
-      <button data-tab="gazette">Result Gazette</button>
+      <button data-tab="gazette" id="navGazetteBtn">Result Gazette</button>
       <button data-tab="calendar">Academic Calendar</button>
       <button data-tab="notes">Study Notes</button>
       <button data-tab="pairing">Pairing Scheme</button>
@@ -346,7 +346,7 @@
         <p>Search your roll number and download your slip with photo, ready to print.</p>
         <button data-goto="rollslip">Get slip &rarr;</button>
       </div>
-      <div class="quick-card">
+      <div class="quick-card" id="homeGazetteCard">
         <div class="badge">G</div>
         <h3>Result Gazette</h3>
         <p>Full class result sheet, generated automatically once results are released.</p>
@@ -544,7 +544,7 @@
     <p class="section-sub">Full class result sheet. Only shows students whose Result Access has been released &mdash; the moment access is given for a student, they appear here automatically.</p>
     <div class="row-2" style="max-width:520px;">
       <div class="field"><label>Session / Year</label><select id="gzSession"><option value="">Select session</option></select></div>
-      <div class="field"><label>Class</label><select id="gzClass">${classOptionsHTML()}</select></div>
+      <div class="field"><label>Class</label><select id="gzClass"></select></div>
     </div>
     <button class="btn-gold" onclick="renderGazette()">Show Gazette</button>
     <div id="gazetteOutput" style="margin-top:20px;"></div>
@@ -900,7 +900,7 @@ function printHTML(html){
   setTimeout(()=>{ legitimatePrintInProgress = false; }, 1000);
 }
 
-let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], subjectTotalMarks:{} };
+let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], subjectTotalMarks:{}, settings:{ gazetteVisible:false } };
 let calSessionFilter = 'All';
 let isAdmin = false;
 let dsClassFilter = 'All';
@@ -958,6 +958,28 @@ async function loadAll(){
   DB.studentAccounts = await getData('studentAccounts', {});
   DB.studentRequests = await getData('studentRequests', []);
   DB.feeRecords = await getData('feeRecords', []);
+  DB.settings = await getData('settings', { gazetteVisible:false });
+}
+
+// Shows/hides the Result Gazette nav option and homepage card based on the
+// admin's Site Settings toggle. Called after load and whenever the toggle changes.
+function applyFeatureVisibility(){
+  const show = !!(DB.settings && DB.settings.gazetteVisible);
+  const navBtn = document.getElementById('navGazetteBtn');
+  const homeCard = document.getElementById('homeGazetteCard');
+  if(navBtn) navBtn.style.display = show ? '' : 'none';
+  if(homeCard) homeCard.style.display = show ? '' : 'none';
+  // If gazette is hidden while a visitor is on that tab, send them home instead of leaving a dead page open.
+  if(!show){
+    const gazTab = document.getElementById('tab-gazette');
+    if(gazTab && gazTab.classList.contains('active')) goto('home');
+  }
+}
+async function toggleGazetteVisibility(){
+  DB.settings.gazetteVisible = !DB.settings.gazetteVisible;
+  await setData('settings', DB.settings);
+  applyFeatureVisibility();
+  renderAdminPanel();
 }
 
 /* ---------------- nav ---------------- */
@@ -1889,6 +1911,8 @@ function populateGazetteFilters(){
   const sessions = Array.from(new Set(DB.enrollments.map(e=>e.session).filter(Boolean))).sort().reverse();
   const sel = document.getElementById('gzSession');
   sel.innerHTML = '<option value="">Select session</option>' + sessions.map(s=>`<option>${esc(s)}</option>`).join('');
+  const classSel = document.getElementById('gzClass');
+  classSel.innerHTML = classOptionsHTML();
 }
 // Builds one class's gazette table for a session. Returns null if there are
 // no released results for that class/session yet. Shared by the on-screen
@@ -2605,6 +2629,18 @@ function renderAdminPanel(){
       <div class="admin-search-wrap">
         <input id="adminQuickSearchInput" placeholder="Search by name, father's name, roll no, or reg no..." autocomplete="off" oninput="adminQuickSearch()" onfocus="adminQuickSearch()">
         <div class="search-results" id="adminQuickSearchResults"></div>
+      </div>
+    </div>
+
+    <div class="admin-block">
+      <h3>Site Settings</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Kuch features sirf tab dikhte hain jab aap yahan se on karein &mdash; warna website par visitors ko nazar nahi aate.</p>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--line);border-radius:8px;">
+        <div>
+          <b>Result Gazette</b>
+          <p class="note-inline" style="margin:2px 0 0;">Nav menu aur homepage par "Result Gazette" option ${DB.settings.gazetteVisible ? 'is waqt visitors ko dikh raha hai.' : 'is waqt chupa hua hai.'}</p>
+        </div>
+        <button type="button" class="tag-btn ${DB.settings.gazetteVisible?'ghost':''}" onclick="toggleGazetteVisibility()">${DB.settings.gazetteVisible ? 'Turn Off' : 'Turn On'}</button>
       </div>
     </div>
 
@@ -4641,6 +4677,7 @@ async function deleteResult(id){
   renderDateSheet();
   renderHomeFeeWidget();
   renderHomeNotesWidget();
+  applyFeatureVisibility();
 })();
 </script>
 </body>
