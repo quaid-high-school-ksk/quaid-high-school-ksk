@@ -3902,7 +3902,13 @@ function renderQuickResultGrid(){
     return;
   }
   const classSubs = Array.from(new Set([...MANDATORY_SUBJECTS, ...(DB.classSubjects[className] || [])]));
+  // Columns come from the class's current subject list (the single source of
+  // truth managed in "Manage Subjects by Class"), not from each student's
+  // frozen enrollment snapshot — otherwise a subject added to the class after
+  // a student enrolled would show as blocked ("—") for that student.
   const subjectSet = new Set(classSubs);
+  // Still add any genuinely extra/custom subjects a specific student has
+  // beyond the class list (e.g. an elective), so those aren't lost.
   enrolled.forEach(en=>{
     (en.subjects ? en.subjects.split(',').map(s=>s.trim()).filter(Boolean) : []).forEach(s=>subjectSet.add(s));
   });
@@ -3913,24 +3919,33 @@ function renderQuickResultGrid(){
   }
   const existingResults = {};
   DB.results.forEach(r=>{ if(r.session===session && r.className===className) existingResults[r.rollNo] = r; });
+  // Template total for a subject: prefer an explicit "Set Total Marks" entry;
+  // otherwise fall back to whatever total was already saved on any student's
+  // result for this subject/term, so totals entered earlier via the
+  // single-student form still show up here instead of appearing blank.
+  const fallbackTotalFor = (subject) => {
+    for(const r of Object.values(existingResults)){
+      const s = (r.subjects||[]).find(x=>x.subject===subject);
+      if(s && s.total!=='' && s.total!=null) return s.total;
+    }
+    return null;
+  };
   let html = `<table><tr><th style="min-width:80px;">Roll No</th><th style="min-width:150px;">Name</th>`;
   subjects.forEach((s,i)=>{
-    const templateTotal = term ? DB.subjectTotalMarks[totalMarksKey(session, className, term, s)] : null;
+    const templateTotal = (term ? DB.subjectTotalMarks[totalMarksKey(session, className, term, s)] : null) ?? fallbackTotalFor(s);
     html += `<th style="min-width:110px;">${esc(s)}<br><input type="number" min="0" class="qre-total-input" data-subject-idx="${i}" placeholder="Total" value="${templateTotal!=null?templateTotal:''}" style="width:75px;margin-top:4px;font-weight:400;"></th>`;
   });
   html += `</tr>`;
   enrolled.forEach(en=>{
     const stu = DB.students.find(s=>s.id===en.studentId);
-    const enrolledSubs = en.subjects ? en.subjects.split(',').map(s=>s.trim()).filter(Boolean) : classSubs;
     const existing = existingResults[en.rollNo];
     const existingMap = {};
     (existing && existing.subjects || []).forEach(s=>{ existingMap[s.subject] = s; });
     html += `<tr data-roll="${esc(en.rollNo)}"><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td>`;
     subjects.forEach((s,i)=>{
-      const applicable = enrolledSubs.includes(s);
       const ex = existingMap[s];
       const val = ex ? ex.obtained : '';
-      html += `<td>${applicable ? `<input type="number" min="0" class="qre-obtained-input" data-roll="${esc(en.rollNo)}" data-subject-idx="${i}" value="${val}" style="width:75px;">` : '<span class="note-inline">&mdash;</span>'}</td>`;
+      html += `<td><input type="number" min="0" class="qre-obtained-input" data-roll="${esc(en.rollNo)}" data-subject-idx="${i}" value="${val}" style="width:75px;"></td>`;
     });
     html += `</tr>`;
   });
