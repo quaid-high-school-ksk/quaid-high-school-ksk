@@ -2790,6 +2790,28 @@ function renderAdminPanel(){
       <div id="setTotalMarksPicker" style="margin-top:10px;"></div>
     </div>
 
+    <div class="admin-block" style="border:2px solid var(--gold);">
+      <h3>Quick Result Entry &mdash; Poori Class Ek Sath</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Session, Class aur Term chunein &mdash; neeche ek grid ban jayega jismein har student ek row aur har subject ek column hoga. Pehle upar har subject ka "Total" marks bhar dein, phir har student ke "obtained" marks type karte jayein (jaise Excel mein). Aakhir mein ek hi button se sab ke results save ho jayenge. Kisi student ka result pehle se ho to us ki marks yahan automatically dikh jayengi, aur dobara save karne se sirf wahi update hoga.</p>
+      <div class="row-2" style="max-width:600px;">
+        <div class="field"><label>Session / Year</label><input required id="qreSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderQuickResultGrid()"></div>
+        <div class="field"><label>Class</label><select required id="qreClass" onchange="renderQuickResultGrid()">${classOptionsHTML()}</select></div>
+      </div>
+      <div class="row-2" style="max-width:600px;">
+        <div class="field"><label>Term</label>
+          <select id="qreTerm" onchange="renderQuickResultGrid()">
+            <option value="1st Term">1st Term</option>
+            <option value="2nd Term">2nd Term</option>
+            <option value="3rd Term">3rd Term</option>
+            <option value="Annual">Annual</option>
+            <option value="__other__">Other (specify)</option>
+          </select>
+        </div>
+        <div class="field" id="qreTermOtherWrap" style="display:none;"><label>Specify Term</label><input id="qreTermOther" oninput="renderQuickResultGrid()" placeholder="e.g. Mid Term"></div>
+      </div>
+      <div id="quickResultGridWrap" style="overflow-x:auto;margin-top:14px;"></div>
+    </div>
+
     <div class="admin-block">
       <h3>Enter Result for a Session (Year)</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Select session and class, then pick the student from the enrolled list &mdash; subjects for that class fill in automatically. Editing an existing result just updates it; old sessions are never overwritten. Term batayega ke agar koi subject mein fail ho to reappear kab hoga: 1st Term mein fail ho to 2nd Term mein reappear, 2nd Term mein fail ho to 3rd Term mein reappear, aur 3rd Term mein fail ho to result ke 10 din ke andar dobara paper de sakta hai.</p>
@@ -3278,18 +3300,31 @@ function renderAdminPanel(){
       <p class="note-inline" style="margin:-6px 0 14px;">Slip Access and Result Access are independent &mdash; e.g. turn off Slip Access while dues are pending, but keep Result Access on. "View Slip" always works here for office use, regardless of Slip Access.</p>
       <div class="row-2" style="max-width:500px;">
         <div class="field"><label>Filter by Session</label>
-          <select id="enrollFilterSession" onchange="enrollFilterSession=this.value; renderAdminPanel();">
+          <select id="enrollFilterSession" onchange="enrollFilterSession=this.value; const _sy=window.scrollY; renderAdminPanel(); window.scrollTo(0,_sy);">
             <option value="All">All Sessions</option>
             ${Array.from(new Set(DB.enrollments.map(en=>en.session).filter(Boolean))).sort().reverse().map(s=>`<option value="${esc(s)}" ${enrollFilterSession===s?'selected':''}>${esc(s)}</option>`).join('')}
           </select>
         </div>
         <div class="field"><label>Filter by Class</label>
-          <select id="enrollFilterClass" onchange="enrollFilterClass=this.value; renderAdminPanel();">
+          <select id="enrollFilterClass" onchange="enrollFilterClass=this.value; const _sy=window.scrollY; renderAdminPanel(); window.scrollTo(0,_sy);">
             <option value="All">All Classes</option>
             ${CLASS_LIST.map(c=>`<option value="${esc(c)}" ${enrollFilterClass===c?'selected':''}>${esc(c)}</option>`).join('')}
           </select>
         </div>
       </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0;padding:12px 14px;border:1px dashed var(--line);border-radius:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <b style="font-size:13px;">Slip Access (${enrollFilterClass==='All'?'All Classes':enrollFilterClass}):</b>
+          <button type="button" class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="bulkSetAccess('slipEnabled', true)">Turn On for All</button>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="bulkSetAccess('slipEnabled', false)">Turn Off for All</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <b style="font-size:13px;">Result Access (${enrollFilterClass==='All'?'All Classes':enrollFilterClass}):</b>
+          <button type="button" class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="bulkSetAccess('resultEnabled', true)">Turn On for All</button>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="bulkSetAccess('resultEnabled', false)">Turn Off for All</button>
+        </div>
+      </div>
+      <p class="note-inline" style="margin:-6px 0 14px;">Upar "Filter by Class" mein "All Classes" chunein to ye buttons sabhi students ke liye kaam karenge, ya koi specific class chunein to sirf usi class ke liye. Individual student ka access neeche table mein alag se bhi on/off kar sakte hain.</p>
       ${(() => {
         const filtered = DB.enrollments.filter(en =>
           (enrollFilterSession==='All' || en.session===enrollFilterSession) &&
@@ -3318,6 +3353,7 @@ function renderAdminPanel(){
 
   renderNoAttendanceList();
   renderSetTotalMarks();
+  renderQuickResultGrid();
 
   document.getElementById('aboutUsForm').addEventListener('submit', async e=>{
     e.preventDefault();
@@ -3836,6 +3872,121 @@ async function saveTotalMarks(){
   const msg = document.getElementById('stmSaveMsg');
   if(msg) msg.innerHTML = '<p class="msg-ok">Saved! Ab is class/term ke har student ka result likhte waqt Total khud bhar jayega.</p>';
 }
+function toggleQreTermOther(){
+  const sel = document.getElementById('qreTerm');
+  const wrap = document.getElementById('qreTermOtherWrap');
+  if(!sel || !wrap) return;
+  wrap.style.display = sel.value==='__other__' ? '' : 'none';
+}
+function qreEffectiveTerm(){
+  const sel = document.getElementById('qreTerm');
+  if(!sel) return '';
+  return sel.value==='__other__' ? (document.getElementById('qreTermOther').value.trim()) : sel.value;
+}
+// Builds the whole-class grid: one row per enrolled student, one column per
+// subject, with a Total-marks input in the header row and an Obtained-marks
+// input per student cell. Pulls in existing saved marks so re-opening this
+// for a class you already entered shows what's there instead of blanks.
+function renderQuickResultGrid(){
+  toggleQreTermOther();
+  const session = (document.getElementById('qreSession')||{}).value?.trim();
+  const className = (document.getElementById('qreClass')||{}).value;
+  const term = qreEffectiveTerm();
+  const wrap = document.getElementById('quickResultGridWrap');
+  if(!wrap) return;
+  if(!session || !className){ wrap.innerHTML = ''; return; }
+  const enrolled = DB.enrollments.filter(en=>en.className===className && en.session===session)
+    .sort((a,b)=>(a.rollNo||'').localeCompare(b.rollNo||'', undefined, {numeric:true}));
+  if(!enrolled.length){
+    wrap.innerHTML = '<div class="empty">Is class/session mein koi enrolled student nahi mila.</div>';
+    return;
+  }
+  const classSubs = Array.from(new Set([...MANDATORY_SUBJECTS, ...(DB.classSubjects[className] || [])]));
+  const subjectSet = new Set(classSubs);
+  enrolled.forEach(en=>{
+    (en.subjects ? en.subjects.split(',').map(s=>s.trim()).filter(Boolean) : []).forEach(s=>subjectSet.add(s));
+  });
+  const subjects = Array.from(subjectSet);
+  if(!subjects.length){
+    wrap.innerHTML = '<p class="note-inline">Is class ke liye subjects set nahi hain &mdash; upar "Manage Subjects by Class" mein pehle add karein.</p>';
+    return;
+  }
+  const existingResults = {};
+  DB.results.forEach(r=>{ if(r.session===session && r.className===className) existingResults[r.rollNo] = r; });
+  let html = `<table><tr><th style="min-width:80px;">Roll No</th><th style="min-width:150px;">Name</th>`;
+  subjects.forEach((s,i)=>{
+    const templateTotal = term ? DB.subjectTotalMarks[totalMarksKey(session, className, term, s)] : null;
+    html += `<th style="min-width:110px;">${esc(s)}<br><input type="number" min="0" class="qre-total-input" data-subject-idx="${i}" placeholder="Total" value="${templateTotal!=null?templateTotal:''}" style="width:75px;margin-top:4px;font-weight:400;"></th>`;
+  });
+  html += `</tr>`;
+  enrolled.forEach(en=>{
+    const stu = DB.students.find(s=>s.id===en.studentId);
+    const enrolledSubs = en.subjects ? en.subjects.split(',').map(s=>s.trim()).filter(Boolean) : classSubs;
+    const existing = existingResults[en.rollNo];
+    const existingMap = {};
+    (existing && existing.subjects || []).forEach(s=>{ existingMap[s.subject] = s; });
+    html += `<tr data-roll="${esc(en.rollNo)}"><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td>`;
+    subjects.forEach((s,i)=>{
+      const applicable = enrolledSubs.includes(s);
+      const ex = existingMap[s];
+      const val = ex ? ex.obtained : '';
+      html += `<td>${applicable ? `<input type="number" min="0" class="qre-obtained-input" data-roll="${esc(en.rollNo)}" data-subject-idx="${i}" value="${val}" style="width:75px;">` : '<span class="note-inline">&mdash;</span>'}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</table>
+  <div style="margin-top:16px;">
+    <button type="button" class="btn-gold" onclick="saveQuickResultGrid()">Save All Results for ${esc(className)}</button>
+  </div>`;
+  wrap.innerHTML = html;
+  wrap.dataset.subjects = JSON.stringify(subjects);
+}
+async function saveQuickResultGrid(){
+  const session = document.getElementById('qreSession').value.trim();
+  const className = document.getElementById('qreClass').value;
+  const term = qreEffectiveTerm();
+  const wrap = document.getElementById('quickResultGridWrap');
+  if(!session || !className || !term){ alert('Session, Class aur Term zaroor bharein.'); return; }
+  const subjects = JSON.parse(wrap.dataset.subjects || '[]');
+  const totals = {};
+  wrap.querySelectorAll('.qre-total-input').forEach(inp=>{
+    if(inp.value !== '') totals[inp.dataset.subjectIdx] = Number(inp.value);
+  });
+  const rows = {};
+  let skippedNoTotal = false;
+  wrap.querySelectorAll('.qre-obtained-input').forEach(inp=>{
+    if(inp.value === '') return;
+    const roll = inp.dataset.roll;
+    const idx = inp.dataset.subjectIdx;
+    const subject = subjects[idx];
+    const total = totals[idx];
+    if(total==null){ skippedNoTotal = true; return; }
+    if(!rows[roll]) rows[roll] = {};
+    rows[roll][subject] = { subject, obtained:Number(inp.value), total };
+  });
+  const rollsWithData = Object.keys(rows);
+  if(!rollsWithData.length){
+    alert(skippedNoTotal ? 'Pehle har subject ke liye Total marks bharein (header row mein), phir obtained marks.' : 'Koi obtained marks nahi mile &mdash; kam az kam ek student ka ek subject bharein.');
+    return;
+  }
+  rollsWithData.forEach(roll=>{
+    const idx = DB.results.findIndex(r=>r.rollNo===roll && r.session===session);
+    const newSubjects = Object.values(rows[roll]);
+    if(idx>=0){
+      const existingSubs = DB.results[idx].subjects || [];
+      const merged = existingSubs.filter(s=>!newSubjects.some(ns=>ns.subject===s.subject)).concat(newSubjects);
+      DB.results[idx] = { ...DB.results[idx], term, className, subjects: merged };
+    } else {
+      DB.results.push({ id: uid(), rollNo: roll, session, className, term, subjects: newSubjects });
+    }
+  });
+  await setData('results', DB.results);
+  lastUsedResultTerm = term;
+  alert(`${rollsWithData.length} students ke results save ho gaye.`);
+  const _sy = window.scrollY;
+  renderAdminPanel();
+  window.scrollTo(0,_sy);
+}
 function renderResultStudentPicker(){
   const session = document.getElementById('rsSession').value.trim();
   const className = document.getElementById('rsClass').value;
@@ -4207,7 +4358,30 @@ async function toggleAccess(id, field){
   if(!en) return;
   en[field] = !en[field];
   await setData('enrollments', DB.enrollments);
+  const _sy = window.scrollY;
   renderAdminPanel();
+  window.scrollTo(0,_sy);
+}
+
+// Bulk on/off for Slip Access or Result Access. Operates on whatever the
+// Session/Class filters above the table currently show — so picking "All
+// Classes" bulk-updates everyone, and picking a specific class bulk-updates
+// just that class.
+async function bulkSetAccess(field, value){
+  const filtered = DB.enrollments.filter(en =>
+    (enrollFilterSession==='All' || en.session===enrollFilterSession) &&
+    (enrollFilterClass==='All' || en.className===enrollFilterClass)
+  );
+  if(!filtered.length){ alert('Is filter mein koi student nahi mila.'); return; }
+  const label = field==='slipEnabled' ? 'Slip Access' : 'Result Access';
+  const scope = enrollFilterClass==='All' ? 'sabhi classes' : ('class ' + enrollFilterClass);
+  const sessionLabel = enrollFilterSession==='All' ? 'sabhi sessions' : ('session ' + enrollFilterSession);
+  if(!confirm(`${label} ko ${scope} (${sessionLabel}) ke ${filtered.length} students ke liye ${value?'ON':'OFF'} kar dein?`)) return;
+  filtered.forEach(en => { en[field] = value; });
+  await setData('enrollments', DB.enrollments);
+  const _sy = window.scrollY;
+  renderAdminPanel();
+  window.scrollTo(0,_sy);
 }
 
 let dsEditingId = null;
