@@ -844,6 +844,18 @@ async function setData(key, value){
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function esc(s){ return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(d){ try{ return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return d;} }
+// Returns whole-years age from a 'YYYY-MM-DD' dob string, or null if dob is
+// missing/invalid. Used by the Under-5 Children List in Admin.
+function calcAgeYears(dob){
+  if(!dob) return null;
+  const b = new Date(dob);
+  if(isNaN(b.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const m = now.getMonth() - b.getMonth();
+  if(m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  return age >= 0 ? age : null;
+}
 
 const CLASS_LIST = ['PG','Nursery','Prep','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten'];
 function classOptionsHTML(selected){
@@ -2069,6 +2081,37 @@ function printClassResultCards(){
   const parts = cards.map((card,i)=>`<div style="${i?'page-break-before:always;':''}">${card.outerHTML}</div>`);
   printHTML(parts.join(''));
 }
+// Prints the Under-5 Children List from the Admin panel: Name, Father's
+// Name, B-Form No and Phone Number for every student aged 5 or under.
+function printUnder5List(){
+  const list = DB.students
+    .map(s=>({ s, age: calcAgeYears(s.dob) }))
+    .filter(x=>x.age !== null && x.age <= 5)
+    .sort((a,b)=>a.age-b.age || a.s.name.localeCompare(b.s.name));
+  if(!list.length){ alert('Is waqt age 5 ya us se kam ka koi student nahi mila (ya DOB nahi bhara hua).'); return; }
+  const rows = list.map((x,i)=>`<tr>
+      <td style="padding:8px;border:1px solid #333;text-align:center;">${i+1}</td>
+      <td style="padding:8px;border:1px solid #333;">${esc(x.s.name)}</td>
+      <td style="padding:8px;border:1px solid #333;">${esc(x.s.fatherName||'-')}</td>
+      <td style="padding:8px;border:1px solid #333;">${esc(x.s.bform||'-')}</td>
+      <td style="padding:8px;border:1px solid #333;">${esc(x.s.parentPhone||'-')}</td>
+      <td style="padding:8px;border:1px solid #333;text-align:center;">${x.age}</td>
+    </tr>`).join('');
+  const html = `${schoolBrandHTML('Under-5 Children List')}
+    <p style="font-size:12px;color:#555;margin:-6px 0 14px;">Generated on ${fmtDate(new Date().toISOString())} &middot; Total: ${list.length}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <tr style="background:#f0f0f0;">
+        <th style="padding:8px;border:1px solid #333;">#</th>
+        <th style="padding:8px;border:1px solid #333;">Name</th>
+        <th style="padding:8px;border:1px solid #333;">Father's Name</th>
+        <th style="padding:8px;border:1px solid #333;">B-Form No</th>
+        <th style="padding:8px;border:1px solid #333;">Phone Number</th>
+        <th style="padding:8px;border:1px solid #333;">Age</th>
+      </tr>
+      ${rows}
+    </table>`;
+  printHTML(html);
+}
 // One-click PDF download of the single-class gazette currently shown &mdash;
 // no print dialog, the file just downloads.
 async function downloadGazettePdf(){
@@ -3230,6 +3273,24 @@ function renderAdminPanel(){
           return `<tr data-stu-id="${esc(s.id)}"><td>${esc(s.name)}</td><td>${esc(s.fatherName||'-')}</td><td>${en?esc(en.className)+' ('+esc(en.session)+')':'-'}</td><td><button class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteStudent('${esc(s.id)}')">Remove</button></td></tr>`;
         }).join('')}
       </table>` : '<div class="empty" style="margin-top:10px;">No students for this session.</div>'}`;
+      })()}
+    </div>
+
+    <div class="admin-block">
+      <h3>Under-5 Children List</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">5 saal ya us se kam age ke tamam bachon ki list &mdash; Name, Father's Name, B-Form No, aur Phone Number ke sath. Date of Birth se age khud calculate hoti hai, is liye har student ka DOB profile mein zaroor bhara ho.</p>
+      ${(() => {
+        const list = DB.students
+          .map(s=>({ s, age: calcAgeYears(s.dob) }))
+          .filter(x=>x.age !== null && x.age <= 5)
+          .sort((a,b)=>a.age-b.age || a.s.name.localeCompare(b.s.name));
+        return `<p style="margin:0 0 12px;font-weight:700;">${list.length} child${list.length===1?'':'ren'} found (age 5 ya us se kam)</p>
+        ${list.length ? `<table>
+          <tr><th>#</th><th>Name</th><th>Father's Name</th><th>B-Form No</th><th>Phone Number</th><th>Age</th></tr>
+          ${list.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.s.name)}</td><td>${esc(x.s.fatherName||'-')}</td><td class="mono">${esc(x.s.bform||'-')}</td><td class="mono">${esc(x.s.parentPhone||'-')}</td><td>${x.age}</td></tr>`).join('')}
+        </table>
+        <button type="button" class="tag-btn" style="margin-top:14px;" onclick="printUnder5List()">Print This List</button>`
+        : '<div class="empty">Abhi koi bhi student is criteria par nahi aata (ya DOB nahi bhara hua).</div>'}`;
       })()}
     </div>
 
