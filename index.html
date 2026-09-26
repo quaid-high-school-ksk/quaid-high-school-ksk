@@ -3296,6 +3296,7 @@ function renderAdminPanel(){
             <select required id="feeClass" onchange="renderFeeStudentPicker()">${classOptionsHTML()}</select>
           </div>
         </div>
+        <div id="feeClassPendingBox"></div>
         <div class="field"><label>Student</label>
           <select required id="feeStudent" onchange="renderFeeStudentPendingDues()">
             <option value="">Select class and session first</option>
@@ -3933,6 +3934,43 @@ function renderFeeStudentPicker(){
   }).join('');
   const box = document.getElementById('feeStudentPendingBox');
   if(box) box.innerHTML = '';
+  renderFeeClassPendingDues();
+}
+// Shows every student in the selected class/session who still has pending
+// dues, with a per-record breakdown (fee type, month/period, pending amount),
+// so admin can see at a glance who owes what without picking students one by
+// one. Students with zero pending dues are left out of this list.
+function renderFeeClassPendingDues(){
+  const box = document.getElementById('feeClassPendingBox');
+  if(!box) return;
+  const session = document.getElementById('feeSession').value.trim();
+  const className = document.getElementById('feeClass').value;
+  if(!session || !className){ box.innerHTML = ''; return; }
+  const enrolled = DB.enrollments.filter(en=>en.className===className && en.session===session);
+  if(!enrolled.length){
+    box.innerHTML = `<p class="note-inline" style="margin:-4px 0 14px;">Class ${esc(className)}, session ${esc(session)} mein koi student enrolled nahi.</p>`;
+    return;
+  }
+  const rows = enrolled.map(en=>{
+    const stu = DB.students.find(s=>s.id===en.studentId);
+    const studentName = stu ? stu.name : '-';
+    const records = DB.feeRecords.filter(r=>r.className===className && r.session===session && r.rollNo===en.rollNo && r.studentName===studentName);
+    const pendingRecords = records.filter(r=>feePendingOf(r)>0);
+    const pending = pendingRecords.reduce((a,r)=>a+feePendingOf(r), 0);
+    return { rollNo: en.rollNo, studentName, pending, pendingRecords };
+  }).filter(x=>x.pending>0).sort((a,b)=> b.pending-a.pending || a.studentName.localeCompare(b.studentName));
+  if(!rows.length){
+    box.innerHTML = `<p class="note-inline" style="margin:-4px 0 14px;color:var(--success);">Class ${esc(className)}, session ${esc(session)} mein kisi bhi student ki dues pending nahi hain.</p>`;
+    return;
+  }
+  const grandTotal = rows.reduce((a,r)=>a+r.pending, 0);
+  box.innerHTML = `<div style="margin:-4px 0 14px;padding:12px 14px;border:1px dashed var(--line);border-radius:8px;">
+    <p style="font-weight:700;margin:0 0 10px;">Class ${esc(className)} (${esc(session)}) &mdash; ${rows.length} student${rows.length===1?'':'s'} ki dues pending &middot; Total: <span class="mono" style="color:var(--danger);">Rs. ${grandTotal.toLocaleString()}</span></p>
+    <table>
+      <tr><th class="mono">Roll No</th><th>Student</th><th class="mono">Pending</th><th>Detail</th></tr>
+      ${rows.map(r=>`<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td class="mono" style="color:var(--danger);font-weight:700;">Rs. ${r.pending.toLocaleString()}</td><td>${r.pendingRecords.map(rec=>`${esc(rec.feeType||'Academy Fee (Monthly)')} (${esc(rec.month)}): Rs. ${feePendingOf(rec).toLocaleString()}`).join('<br>')}</td></tr>`).join('')}
+    </table>
+  </div>`;
 }
 // Shows the selected student's pending dues right under the Student picker
 // (for their currently selected class/session), so admin can see at a glance
