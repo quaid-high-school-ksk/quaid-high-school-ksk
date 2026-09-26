@@ -3937,9 +3937,19 @@ function renderFeeStudentPicker(){
   renderFeeClassPendingDues();
 }
 // Shows every student in the selected class/session who still has pending
-// dues, with a per-record breakdown (fee type, month/period, pending amount),
-// so admin can see at a glance who owes what without picking students one by
-// one. Students with zero pending dues are left out of this list.
+// dues, with a per-record breakdown (fee type, month/period, pending amount).
+// Each pending record can be expanded inline to either log a payment (amount
+// + the actual date it was received) or edit the record itself (amount,
+// month/period, due date, status) &mdash; so admin can see at a glance who
+// owes what, without picking students one by one, and fix/settle it right
+// there. Students with zero pending dues are left out of this list.
+let feePendingOpenId = null;   // id of the fee record whose inline form is open
+let feePendingOpenMode = null; // 'pay' | 'edit'
+function toggleFeePendingForm(id, mode){
+  feePendingOpenId = (feePendingOpenId===id && feePendingOpenMode===mode) ? null : id;
+  feePendingOpenMode = (feePendingOpenId===id) ? mode : null;
+  renderFeeClassPendingDues();
+}
 function renderFeeClassPendingDues(){
   const box = document.getElementById('feeClassPendingBox');
   if(!box) return;
@@ -3964,13 +3974,121 @@ function renderFeeClassPendingDues(){
     return;
   }
   const grandTotal = rows.reduce((a,r)=>a+r.pending, 0);
+  const today = new Date().toISOString().slice(0,10);
+  const renderRecordLine = rec => {
+    const pendingAmt = feePendingOf(rec);
+    const isPayOpen = feePendingOpenId===rec.id && feePendingOpenMode==='pay';
+    const isEditOpen = feePendingOpenId===rec.id && feePendingOpenMode==='edit';
+    let inline = '';
+    if(isPayOpen){
+      inline = `<div style="margin:8px 0;padding:10px;background:var(--panel-2, #f7f7f7);border-radius:6px;">
+        <div class="row-2">
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Amount Received (Rs.)</label><input type="number" id="ppAmt-${esc(rec.id)}" max="${pendingAmt}" placeholder="e.g. 500" style="max-width:160px;"></div>
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Date Received</label><input type="date" id="ppDate-${esc(rec.id)}" value="${today}" style="max-width:160px;"></div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button type="button" class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="savePendingPayment('${esc(rec.id)}')">Save Payment</button>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeePendingForm('${esc(rec.id)}','pay')">Cancel</button>
+        </div>
+      </div>`;
+    }
+    if(isEditOpen){
+      inline = `<div style="margin:8px 0;padding:10px;background:var(--panel-2, #f7f7f7);border-radius:6px;">
+        <p class="note-inline" style="margin:0 0 8px;">Amount edit karne se total badal jayega &mdash; agar is entry mein pehle se alag-alag type ka breakdown tha, wo hat jayega aur sirf ye ek total rahega.</p>
+        <div class="row-2">
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Month / Period</label><input id="peMonth-${esc(rec.id)}" value="${esc(rec.month||'')}"></div>
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Total Amount (Rs.)</label><input type="number" id="peAmt-${esc(rec.id)}" value="${Number(rec.amount||0)}" style="max-width:160px;"></div>
+        </div>
+        <div class="row-2" style="margin-top:8px;">
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Due Date</label><input type="date" id="peDue-${esc(rec.id)}" value="${rec.dueDate||''}"></div>
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Status</label>
+            <select id="peStatus-${esc(rec.id)}">
+              <option value="unpaid" ${rec.status!=='paid'?'selected':''}>Unpaid / Partially Paid</option>
+              <option value="paid" ${rec.status==='paid'?'selected':''}>Fully Paid</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+          <button type="button" class="tag-btn" style="padding:4px 10px;font-size:12px;" onclick="savePendingEdit('${esc(rec.id)}')">Save Changes</button>
+          <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="toggleFeePendingForm('${esc(rec.id)}','edit')">Cancel</button>
+        </div>
+      </div>`;
+    }
+    return `<div style="margin-bottom:6px;">
+      <span>${esc(rec.feeType||'Academy Fee (Monthly)')} (${esc(rec.month)}): </span>
+      <button type="button" onclick="toggleFeePendingForm('${esc(rec.id)}','pay')" style="background:none;border:none;padding:0;color:var(--danger);font-weight:700;text-decoration:underline;cursor:pointer;font:inherit;">Rs. ${pendingAmt.toLocaleString()}</button>
+      <button type="button" class="tag-btn ghost" style="padding:2px 8px;font-size:11px;margin-left:8px;" onclick="toggleFeePendingForm('${esc(rec.id)}','edit')">Edit</button>
+      ${feePaymentsHistoryLine(rec)}
+      ${inline}
+    </div>`;
+  };
   box.innerHTML = `<div style="margin:-4px 0 14px;padding:12px 14px;border:1px dashed var(--line);border-radius:8px;">
     <p style="font-weight:700;margin:0 0 10px;">Class ${esc(className)} (${esc(session)}) &mdash; ${rows.length} student${rows.length===1?'':'s'} ki dues pending &middot; Total: <span class="mono" style="color:var(--danger);">Rs. ${grandTotal.toLocaleString()}</span></p>
+    <p class="note-inline" style="margin:0 0 10px;">Pending amount par click karein payment likhne ke liye (raqam + date), ya "Edit" par click karein entry theek karne ke liye.</p>
     <table>
       <tr><th class="mono">Roll No</th><th>Student</th><th class="mono">Pending</th><th>Detail</th></tr>
-      ${rows.map(r=>`<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td class="mono" style="color:var(--danger);font-weight:700;">Rs. ${r.pending.toLocaleString()}</td><td>${r.pendingRecords.map(rec=>`${esc(rec.feeType||'Academy Fee (Monthly)')} (${esc(rec.month)}): Rs. ${feePendingOf(rec).toLocaleString()}`).join('<br>')}</td></tr>`).join('')}
+      ${rows.map(r=>`<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td class="mono" style="color:var(--danger);font-weight:700;">Rs. ${r.pending.toLocaleString()}</td><td>${r.pendingRecords.map(renderRecordLine).join('')}</td></tr>`).join('')}
     </table>
   </div>`;
+}
+// Logs a payment against one pending fee record with the exact date it was
+// received (not just "today"), keeping every past installment on record.
+async function savePendingPayment(id){
+  const r = DB.feeRecords.find(x=>x.id===id);
+  if(!r) return;
+  const total = Number(r.amount||0);
+  const already = feePaidOf(r);
+  const remaining = Math.max(total-already, 0);
+  const amtInput = document.getElementById(`ppAmt-${id}`);
+  const dateInput = document.getElementById(`ppDate-${id}`);
+  const amt = Math.max(0, Math.min(Number(amtInput.value)||0, remaining));
+  const date = dateInput.value || new Date().toISOString().slice(0,10);
+  if(!amt){ alert('Sahi amount likhein.'); return; }
+  if(!r.payments) r.payments = [];
+  r.payments.push({ date, amount: amt });
+  const newPaid = feePaidOf(r);
+  r.paidAmount = newPaid;
+  r.pendingAmount = Math.max(total-newPaid, 0);
+  r.status = newPaid>=total ? 'paid' : 'unpaid';
+  r.paymentDate = date;
+  if(newPaid>=total) r.dueDate = null;
+  await setData('feeRecords', DB.feeRecords);
+  feePendingOpenId = null; feePendingOpenMode = null;
+  renderFeeClassPendingDues();
+  renderHomeFeeWidget();
+}
+// Edits a pending fee record's amount, month/period, due date, and status
+// directly from the class pending-dues list.
+async function savePendingEdit(id){
+  const r = DB.feeRecords.find(x=>x.id===id);
+  if(!r) return;
+  const month = document.getElementById(`peMonth-${id}`).value.trim();
+  const amount = Number(document.getElementById(`peAmt-${id}`).value)||0;
+  const dueDate = document.getElementById(`peDue-${id}`).value || null;
+  const status = document.getElementById(`peStatus-${id}`).value;
+  if(!month || amount<=0){ alert('Month/Period aur amount theek se bharein.'); return; }
+  r.month = month;
+  r.amount = amount;
+  r.dueDate = status==='paid' ? null : dueDate;
+  delete r.breakdown;
+  if(status==='paid'){
+    const already = feePaidOf(r);
+    if(!r.payments) r.payments = [];
+    const remainder = amount - already;
+    if(remainder>0) r.payments.push({ date: new Date().toISOString().slice(0,10), amount: remainder });
+    r.paidAmount = amount;
+    r.pendingAmount = 0;
+    r.status = 'paid';
+    if(!r.paymentDate) r.paymentDate = new Date().toISOString().slice(0,10);
+  } else {
+    r.status = 'unpaid';
+    r.paidAmount = feePaidOf(r);
+    r.pendingAmount = Math.max(amount-r.paidAmount, 0);
+  }
+  await setData('feeRecords', DB.feeRecords);
+  feePendingOpenId = null; feePendingOpenMode = null;
+  renderFeeClassPendingDues();
+  renderHomeFeeWidget();
 }
 // Shows the selected student's pending dues right under the Student picker
 // (for their currently selected class/session), so admin can see at a glance
