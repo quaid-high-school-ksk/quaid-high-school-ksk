@@ -2253,11 +2253,11 @@ function buildPortalRecordHTML(student, scope){
         <div class="date">${esc(r.className)} &middot; ${esc(r.month)}${r.session?' &middot; Session '+esc(r.session):''}</div>
         <h4 style="margin-bottom:8px;">${esc(r.month)} Progress Report</h4>
         ${(r.subjects||[]).length ? `<table>
-          <tr><th>Subject</th><th>Learning</th><th>Behavior</th><th>Listening/Sunna</th><th>Test</th></tr>
+          <tr><th>Subject</th><th>Learning</th><th>Behavior</th><th>Listening/Sunna</th><th>Writing</th><th>Test</th></tr>
           ${(r.subjects||[]).map(s=>{
             const t = s.test;
             const testCell = t ? `${t.date?fmtDate(t.date)+' &middot; ':''}${esc(t.obtained||'0')} / ${esc(t.total||'0')}` : '-';
-            return `<tr><td>${esc(s.subject)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td class="mono">${testCell}</td></tr>`;
+            return `<tr><td>${esc(s.subject)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${testCell}</td></tr>`;
           }).join('')}
         </table>` : '<div class="empty">No subject-wise remarks entered.</div>'}
         ${r.overallRemarks ? `<p style="margin-top:10px;"><strong>Overall Remarks:</strong> ${esc(r.overallRemarks)}</p>` : ''}
@@ -3670,6 +3670,7 @@ function renderAdminPanel(){
         learning: row.querySelector('.pr-learning').value.trim(),
         behavior: row.querySelector('.pr-behavior').value.trim(),
         listening: row.querySelector('.pr-listening').value.trim(),
+        writing: row.querySelector('.pr-writing').value.trim(),
         test: testHappened ? {
           date: row.querySelector('.pr-test-date').value,
           obtained: row.querySelector('.pr-test-obtained').value,
@@ -4606,6 +4607,7 @@ function renderProgressSubjectPicker(){
         <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Learning</label><textarea class="pr-learning" rows="2" placeholder="e.g. Naya sabaq acha samajh raha hai">${esc(ex?ex.learning:'')}</textarea></div>
         <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Behavior</label><textarea class="pr-behavior" rows="2" placeholder="e.g. Class mein tawajjo se baithta hai">${esc(ex?ex.behavior:'')}</textarea></div>
         <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Listening / Sunna</label><textarea class="pr-listening" rows="2" placeholder="e.g. Pichla sabaq theek se suna diya">${esc(ex?ex.listening:'')}</textarea></div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Writing</label><textarea class="pr-writing" rows="2" placeholder="e.g. Likhai saaf aur seedhi ho rahi hai">${esc(ex?ex.writing:'')}</textarea></div>
         <label style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-top:6px;">
           <input type="checkbox" class="pr-test-check" ${ex&&ex.test?'checked':''} onchange="togglePrTestFields(this)" style="width:auto;"> Is month is subject mein test hua
         </label>
