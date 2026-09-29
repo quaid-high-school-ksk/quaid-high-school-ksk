@@ -936,7 +936,7 @@ function printHTML(html){
   setTimeout(()=>{ legitimatePrintInProgress = false; }, 1000);
 }
 
-let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], subjectTotalMarks:{}, settings:{ gazetteVisible:false } };
+let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], progressReports:[], subjectTotalMarks:{}, settings:{ gazetteVisible:false } };
 let calSessionFilter = 'All';
 let isAdmin = false;
 let dsClassFilter = 'All';
@@ -962,6 +962,9 @@ let resultsAdminSessionFilter = 'All';
 let attendanceAdminSessionFilter = 'All';
 let studentsAdminSessionFilter = 'All';
 let feeAdminSessionFilter = 'All';
+let progressAdminSessionFilter = 'All';
+let lastUsedProgressMonth = ''; // remembers the last Month/Period typed while entering progress reports, so switching students in the same sitting doesn't reset it
+let progressEditingId = null; // id of the progress report currently being edited via the "Edit" button, else null
 let dsAdminClassFilter = 'All';
 let dsAdminSessionFilter = 'All';
 let homeFeeMonthFilter = 'All';
@@ -994,6 +997,7 @@ async function loadAll(){
   DB.studentAccounts = await getData('studentAccounts', {});
   DB.studentRequests = await getData('studentRequests', []);
   DB.feeRecords = await getData('feeRecords', []);
+  DB.progressReports = await getData('progressReports', []);
   DB.settings = await getData('settings', { gazetteVisible:false });
 }
 
@@ -2237,6 +2241,29 @@ function buildPortalRecordHTML(student, scope){
       </table>`
     : '<div class="empty">No date sheet entries yet.</div>';
 
+  // Monthly Progress Reports (subject-wise Learning/Behavior/Listening
+  // remarks) across every session this student has been enrolled in, newest
+  // month first. Shown with just name and father's name &mdash; no photo.
+  const myRollNos = new Set(enrolls.map(en=>en.rollNo+'|'+en.session));
+  const progressRows = DB.progressReports
+    .filter(r=>myRollNos.has(r.rollNo+'|'+r.session))
+    .sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  const progressHTML = progressRows.length
+    ? progressRows.map(r=>`<div class="notice">
+        <div class="date">${esc(r.className)} &middot; ${esc(r.month)}${r.session?' &middot; Session '+esc(r.session):''}</div>
+        <h4 style="margin-bottom:8px;">${esc(r.month)} Progress Report</h4>
+        ${(r.subjects||[]).length ? `<table>
+          <tr><th>Subject</th><th>Learning</th><th>Behavior</th><th>Listening/Sunna</th><th>Test</th></tr>
+          ${(r.subjects||[]).map(s=>{
+            const t = s.test;
+            const testCell = t ? `${t.date?fmtDate(t.date)+' &middot; ':''}${esc(t.obtained||'0')} / ${esc(t.total||'0')}` : '-';
+            return `<tr><td>${esc(s.subject)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td class="mono">${testCell}</td></tr>`;
+          }).join('')}
+        </table>` : '<div class="empty">No subject-wise remarks entered.</div>'}
+        ${r.overallRemarks ? `<p style="margin-top:10px;"><strong>Overall Remarks:</strong> ${esc(r.overallRemarks)}</p>` : ''}
+      </div>`).join('')
+    : '<div class="empty">No monthly progress report available yet.</div>';
+
   // Study Notes for this student's current class, watermarked with their name.
   const notesRows = DB.notes.filter(n=>n.className===latest.className).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).slice(0,10);
   const wmText = `Quaid High School KSK \u2022 ${student.name}`;
@@ -2299,6 +2326,10 @@ function buildPortalRecordHTML(student, scope){
     <div class="admin-block" style="background:#fff;margin-bottom:16px;">
       <h4 style="margin-bottom:10px;">Result</h4>
       ${resultHTML}
+    </div>
+    <div class="admin-block" style="background:#fff;margin-bottom:16px;">
+      <h4 style="margin-bottom:10px;">Monthly Progress Report</h4>
+      ${progressHTML}
     </div>
     <div class="admin-block" style="background:#fff;margin-bottom:16px;">
       <h4 style="margin-bottom:10px;">Roll No Slip</h4>
@@ -2976,6 +3007,48 @@ function renderAdminPanel(){
     </div>
 
     <div class="admin-block">
+      <h3>Monthly Progress Report</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Select session, class, student, and month &mdash; then, for each of that student's subjects, tick it and write Learning, Behavior, and Listening/Sunna remarks separately. Overall remarks go at the bottom. This shows to the student/parent in the Student Portal (Roll No/B-Form login) &mdash; no photo, just name and father's name.</p>
+      <form id="progressForm">
+        <div class="row-2">
+          <div class="field"><label>Session / Year</label><input required id="prSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderProgressStudentPicker()"></div>
+          <div class="field"><label>Class</label>
+            <select required id="prClass" onchange="renderProgressStudentPicker()">${classOptionsHTML()}</select>
+          </div>
+        </div>
+        <div class="field"><label>Month / Period</label><input required id="prMonth" placeholder="e.g. September 2026" oninput="rememberProgressMonth(); renderProgressSubjectPicker();"></div>
+        <div class="field"><label>Student</label>
+          <select required id="prStudent" onchange="suggestProgressMonthAndRender()">
+            <option value="">Select class and session first</option>
+          </select>
+        </div>
+        <div id="progressSubjectPicker"></div>
+        <div class="field"><label>Overall Remarks</label><textarea id="prOverall" rows="3" placeholder="Overall progress, general behavior, attendance etc."></textarea></div>
+        <div style="margin-top:16px;">
+          <button type="submit" class="btn-gold">Save Progress Report</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="admin-block" id="progressAdminBlock">
+      <h3>All Monthly Progress Reports (${DB.progressReports.length})</h3>
+      ${(() => {
+        const sessions = ['All', ...Array.from(new Set(DB.progressReports.map(r=>r.session).filter(Boolean))).sort().reverse()];
+        const filtered = DB.progressReports.filter(r=> progressAdminSessionFilter==='All' || r.session===progressAdminSessionFilter);
+        return `<div class="filter-chips">${sessions.map(s=>`<button type="button" class="chip ${s===progressAdminSessionFilter?'active':''}" onclick="progressAdminSessionFilter='${esc(s)}'; renderAdminPanel();">${s==='All'?'All Sessions':esc(s)}</button>`).join('')}</div>
+        ${filtered.length ? `<table style="margin-top:14px;">
+        <tr><th class="mono">Roll No</th><th>Name</th><th class="mono">Session</th><th>Class</th><th>Month/Period</th><th class="mono">Subjects</th><th></th></tr>
+        ${[...filtered].sort((a,b)=>(b.session||'').localeCompare(a.session||'') || (b.month||'').localeCompare(a.month||'')).map(r=>{
+          return `<tr data-roll="${esc(r.rollNo)}" data-session="${esc(r.session)}"><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td class="mono">${esc(r.session)}</td><td>${esc(r.className)}</td><td>${esc(r.month)}</td><td class="mono">${(r.subjects||[]).length}</td><td>
+            <button type="button" class="tag-btn ghost" style="padding:4px 10px;font-size:12px;" onclick="editProgressReport('${esc(r.id)}')">Edit</button>
+            <button type="button" class="tag-btn danger" style="padding:4px 10px;font-size:12px;" onclick="deleteProgressReport('${esc(r.id)}')">Remove</button>
+          </td></tr>`;
+        }).join('')}
+      </table>` : '<div class="empty" style="margin-top:10px;">No progress reports for this session.</div>'}`;
+      })()}
+    </div>
+
+    <div class="admin-block">
       <h3>Manage Subjects by Class</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Add or remove subjects for any class any time &mdash; this list is what shows up as checkboxes below when adding date sheet entries.</p>
       <div class="field"><label>Class</label>
@@ -3575,6 +3648,52 @@ function renderAdminPanel(){
     const record = { id: existingIdx>=0 ? DB.results[existingIdx].id : uid(), rollNo, session, className, subjects, term };
     if(existingIdx>=0) DB.results[existingIdx] = record; else DB.results.push(record);
     await setData('results', DB.results);
+    renderAdminPanel();
+  });
+
+  document.getElementById('progressForm').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const rollNo = document.getElementById('prStudent').value;
+    const session = document.getElementById('prSession').value.trim();
+    const className = document.getElementById('prClass').value;
+    const month = document.getElementById('prMonth').value.trim();
+    if(!rollNo || !month){ return; }
+    const en = DB.enrollments.find(x=>x.rollNo===rollNo && x.session===session && x.className===className);
+    const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
+    const rows = document.querySelectorAll('#progressSubjectPicker .pr-subject-row');
+    const subjects = [];
+    rows.forEach(row=>{
+      if(!row.querySelector('.pr-subject-check').checked) return;
+      const testHappened = row.querySelector('.pr-test-check').checked;
+      subjects.push({
+        subject: row.dataset.subject,
+        learning: row.querySelector('.pr-learning').value.trim(),
+        behavior: row.querySelector('.pr-behavior').value.trim(),
+        listening: row.querySelector('.pr-listening').value.trim(),
+        test: testHappened ? {
+          date: row.querySelector('.pr-test-date').value,
+          obtained: row.querySelector('.pr-test-obtained').value,
+          total: row.querySelector('.pr-test-total').value
+        } : null
+      });
+    });
+    const overallRemarks = document.getElementById('prOverall').value.trim();
+    const editId = progressEditingId;
+    const existingIdx = editId
+      ? DB.progressReports.findIndex(r=>r.id===editId)
+      : DB.progressReports.findIndex(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month);
+    const record = {
+      id: existingIdx>=0 ? DB.progressReports[existingIdx].id : uid(),
+      rollNo, session, className, month,
+      studentName: stu ? stu.name : (existingIdx>=0 ? DB.progressReports[existingIdx].studentName : ''),
+      subjects, overallRemarks,
+      date: new Date().toISOString().slice(0,10)
+    };
+    if(existingIdx>=0) DB.progressReports[existingIdx] = record; else DB.progressReports.push(record);
+    await setData('progressReports', DB.progressReports);
+    progressEditingId = null;
+    document.getElementById('prMonth').value = '';
+    document.getElementById('prOverall').value = '';
     renderAdminPanel();
   });
 
@@ -4411,6 +4530,120 @@ function toggleRsStarPass(checkbox){
     absentCheck.checked = false;
     toggleRsAbsent(absentCheck);
   }
+}
+
+// ============================================================
+// MONTHLY PROGRESS REPORT (subject-wise Learning/Behavior/Listening remarks)
+// ============================================================
+function renderProgressStudentPicker(){
+  const session = document.getElementById('prSession').value.trim();
+  const className = document.getElementById('prClass').value;
+  const sel = document.getElementById('prStudent');
+  if(!session || !className){
+    sel.innerHTML = '<option value="">Select class and session first</option>';
+    document.getElementById('progressSubjectPicker').innerHTML = '';
+    return;
+  }
+  const enrolled = DB.enrollments.filter(en=>en.className===className && en.session===session);
+  if(!enrolled.length){
+    sel.innerHTML = '<option value="">No students enrolled in this class/session yet</option>';
+    document.getElementById('progressSubjectPicker').innerHTML = '';
+    return;
+  }
+  sel.innerHTML = '<option value="">Select student</option>' + enrolled.map(en=>{
+    const stu = DB.students.find(s=>s.id===en.studentId);
+    return `<option value="${esc(en.rollNo)}">${esc(en.rollNo)} &mdash; ${esc(stu?stu.name:'-')}</option>`;
+  }).join('');
+  document.getElementById('progressSubjectPicker').innerHTML = '';
+}
+function rememberProgressMonth(){
+  const val = document.getElementById('prMonth').value.trim();
+  if(val) lastUsedProgressMonth = val;
+}
+// Called when the Student dropdown changes: suggests the last-used month (so
+// entering the whole class in one sitting doesn't need retyping it each
+// time), then renders the subject picker with that student's existing
+// report for the month (if any) pre-filled.
+function suggestProgressMonthAndRender(){
+  const monthInput = document.getElementById('prMonth');
+  if(monthInput && !monthInput.value.trim() && lastUsedProgressMonth){
+    monthInput.value = lastUsedProgressMonth;
+  }
+  renderProgressSubjectPicker();
+}
+function renderProgressSubjectPicker(){
+  const className = document.getElementById('prClass').value;
+  const session = document.getElementById('prSession').value.trim();
+  const rollNo = document.getElementById('prStudent').value;
+  const month = document.getElementById('prMonth').value.trim();
+  const wrap = document.getElementById('progressSubjectPicker');
+  if(!rollNo){ wrap.innerHTML = ''; return; }
+  const enr = DB.enrollments.find(en=>en.rollNo===rollNo && en.session===session && en.className===className);
+  const enrolledSubs = enr && enr.subjects ? enr.subjects.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  const subs = enrolledSubs.length ? enrolledSubs : Array.from(new Set([...MANDATORY_SUBJECTS, ...(DB.classSubjects[className] || [])]));
+  if(!subs.length){
+    wrap.innerHTML = '<p class="note-inline">Is class ke liye abhi subjects set nahi hain &mdash; upar "Manage Subjects by Class" mein add karein.</p>';
+    return;
+  }
+  const existing = month ? DB.progressReports.find(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month) : null;
+  if(existing){
+    progressEditingId = existing.id;
+    document.getElementById('prOverall').value = existing.overallRemarks || '';
+  } else {
+    progressEditingId = null;
+    document.getElementById('prOverall').value = '';
+  }
+  const existingMap = {};
+  (existing && existing.subjects || []).forEach(s=>{ existingMap[s.subject] = s; });
+  wrap.innerHTML = `<h4 style="margin:14px 0 8px;font-size:14px;">Subject-wise Progress</h4>` + subs.map(s=>{
+    const ex = existingMap[s];
+    return `
+    <div class="pr-subject-row" data-subject="${esc(s)}" style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+        <input type="checkbox" class="pr-subject-check" ${ex?'checked':''} onchange="togglePrSubjectFields(this)"> ${esc(s)}
+      </label>
+      <div class="pr-subject-fields" style="display:${ex?'block':'none'};margin-top:8px;">
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Learning</label><textarea class="pr-learning" rows="2" placeholder="e.g. Naya sabaq acha samajh raha hai">${esc(ex?ex.learning:'')}</textarea></div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Behavior</label><textarea class="pr-behavior" rows="2" placeholder="e.g. Class mein tawajjo se baithta hai">${esc(ex?ex.behavior:'')}</textarea></div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Listening / Sunna</label><textarea class="pr-listening" rows="2" placeholder="e.g. Pichla sabaq theek se suna diya">${esc(ex?ex.listening:'')}</textarea></div>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-top:6px;">
+          <input type="checkbox" class="pr-test-check" ${ex&&ex.test?'checked':''} onchange="togglePrTestFields(this)" style="width:auto;"> Is month is subject mein test hua
+        </label>
+        <div class="pr-test-fields" style="display:${ex&&ex.test?'grid':'none'};grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;">
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Test Date</label><input type="date" class="pr-test-date" value="${ex&&ex.test?esc(ex.test.date||''):''}"></div>
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Obtained Marks</label><input type="number" class="pr-test-obtained" value="${ex&&ex.test?esc(ex.test.obtained):''}"></div>
+          <div class="field" style="margin:0;"><label style="font-size:12px;">Total Marks</label><input type="number" class="pr-test-total" value="${ex&&ex.test?esc(ex.test.total):''}"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function togglePrSubjectFields(checkbox){
+  const row = checkbox.closest('.pr-subject-row');
+  row.querySelector('.pr-subject-fields').style.display = checkbox.checked ? 'block' : 'none';
+}
+function togglePrTestFields(checkbox){
+  const row = checkbox.closest('.pr-subject-row');
+  row.querySelector('.pr-test-fields').style.display = checkbox.checked ? 'grid' : 'none';
+}
+// Loads an existing progress report back into the form above for editing.
+function editProgressReport(id){
+  const r = DB.progressReports.find(x=>x.id===id);
+  if(!r) return;
+  progressEditingId = id;
+  document.getElementById('prSession').value = r.session;
+  document.getElementById('prClass').value = r.className;
+  renderProgressStudentPicker();
+  document.getElementById('prStudent').value = r.rollNo;
+  document.getElementById('prMonth').value = r.month;
+  renderProgressSubjectPicker();
+  window.scrollTo({ top: document.getElementById('progressForm').getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+}
+async function deleteProgressReport(id){
+  if(!confirm('Kya aap waqai ye progress report remove karna chahte hain?')) return;
+  DB.progressReports = DB.progressReports.filter(r=>r.id!==id);
+  await setData('progressReports', DB.progressReports);
+  renderAdminPanel();
 }
 
 function handlePhotoUpload(e){
