@@ -3006,6 +3006,20 @@ function renderAdminPanel(){
       })()}
     </div>
 
+    <div class="admin-block" style="border:2px solid var(--gold);">
+      <h3>Quick Progress Entry &mdash; Poori Class, Ek Subject Ek Sath</h3>
+      <p class="note-inline" style="margin:-6px 0 14px;">Session, Class, Month, aur ek Subject chunein &mdash; neeche us class ke saare students ek row mein aa jayenge, Learning/Behavior/Listening/Writing aur (agar test hua ho) Test Date/Obtained/Total bharein aur ek hi button se poori class ka us subject ka progress save ho jayega. Doosre subject ke liye subject badal kar dobara kar lein. Kisi student ki row khali chhod dein to uski koi purani entry nahi badlegi.</p>
+      <div class="row-2" style="max-width:700px;">
+        <div class="field"><label>Session / Year</label><input required id="qpSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderQuickProgressGrid()"></div>
+        <div class="field"><label>Class</label><select required id="qpClass" onchange="renderQuickProgressSubjectPicker()">${classOptionsHTML()}</select></div>
+      </div>
+      <div class="row-2" style="max-width:700px;">
+        <div class="field"><label>Month / Period</label><input required id="qpMonth" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderQuickProgressGrid();"></div>
+        <div class="field"><label>Subject</label><select required id="qpSubject" onchange="renderQuickProgressGrid()"><option value="">Select class first</option></select></div>
+      </div>
+      <div id="quickProgressGridWrap" style="overflow-x:auto;margin-top:14px;"></div>
+    </div>
+
     <div class="admin-block">
       <h3>Monthly Progress Report</h3>
       <p class="note-inline" style="margin:-6px 0 14px;">Select session, class, student, and month &mdash; then, for each of that student's subjects, tick it and write Learning, Behavior, and Listening/Sunna remarks separately. Overall remarks go at the bottom. This shows to the student/parent in the Student Portal (Roll No/B-Form login) &mdash; no photo, just name and father's name.</p>
@@ -3016,7 +3030,7 @@ function renderAdminPanel(){
             <select required id="prClass" onchange="renderProgressStudentPicker()">${classOptionsHTML()}</select>
           </div>
         </div>
-        <div class="field"><label>Month / Period</label><input required id="prMonth" placeholder="e.g. September 2026" oninput="rememberProgressMonth(); renderProgressSubjectPicker();"></div>
+        <div class="field"><label>Month / Period</label><input required id="prMonth" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderProgressSubjectPicker();"></div>
         <div class="field"><label>Student</label>
           <select required id="prStudent" onchange="suggestProgressMonthAndRender()">
             <option value="">Select class and session first</option>
@@ -4533,6 +4547,120 @@ function toggleRsStarPass(checkbox){
   }
 }
 
+// ============================================================
+// QUICK PROGRESS ENTRY (one subject, whole class at once)
+// ============================================================
+function renderQuickProgressSubjectPicker(){
+  const className = document.getElementById('qpClass').value;
+  const sel = document.getElementById('qpSubject');
+  if(!className){
+    sel.innerHTML = '<option value="">Select class first</option>';
+    document.getElementById('quickProgressGridWrap').innerHTML = '';
+    return;
+  }
+  const subs = Array.from(new Set([...MANDATORY_SUBJECTS, ...(DB.classSubjects[className] || [])]));
+  if(!subs.length){
+    sel.innerHTML = '<option value="">No subjects set for this class</option>';
+    document.getElementById('quickProgressGridWrap').innerHTML = '';
+    return;
+  }
+  sel.innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  renderQuickProgressGrid();
+}
+function renderQuickProgressGrid(){
+  const session = (document.getElementById('qpSession')||{}).value?.trim();
+  const className = (document.getElementById('qpClass')||{}).value;
+  const month = (document.getElementById('qpMonth')||{}).value?.trim();
+  const subject = (document.getElementById('qpSubject')||{}).value;
+  const wrap = document.getElementById('quickProgressGridWrap');
+  if(!wrap) return;
+  if(!session || !className || !subject){ wrap.innerHTML = ''; return; }
+  const enrolled = DB.enrollments.filter(en=>en.className===className && en.session===session)
+    .sort((a,b)=>(a.rollNo||'').localeCompare(b.rollNo||'', undefined, {numeric:true}));
+  if(!enrolled.length){
+    wrap.innerHTML = '<div class="empty">Is class/session mein koi enrolled student nahi mila.</div>';
+    return;
+  }
+  const existingByRoll = {};
+  if(month){
+    DB.progressReports.forEach(r=>{
+      if(r.session===session && r.className===className && r.month===month) existingByRoll[r.rollNo] = r;
+    });
+  }
+  let html = `<table><tr><th style="min-width:70px;">Roll No</th><th style="min-width:130px;">Name</th><th style="min-width:160px;">Learning</th><th style="min-width:160px;">Behavior</th><th style="min-width:160px;">Listening/Sunna</th><th style="min-width:160px;">Writing</th><th style="min-width:110px;">Test Date</th><th style="min-width:80px;">Obtained</th><th style="min-width:80px;">Total</th></tr>`;
+  enrolled.forEach(en=>{
+    const stu = DB.students.find(s=>s.id===en.studentId);
+    const rec = existingByRoll[en.rollNo];
+    const ex = rec ? (rec.subjects||[]).find(s=>s.subject===subject) : null;
+    const t = ex && ex.test;
+    html += `<tr data-roll="${esc(en.rollNo)}">
+      <td class="mono">${esc(en.rollNo)}</td>
+      <td>${esc(stu?stu.name:'-')}</td>
+      <td><textarea class="qp-learning" rows="2" style="min-width:150px;">${esc(ex?ex.learning:'')}</textarea></td>
+      <td><textarea class="qp-behavior" rows="2" style="min-width:150px;">${esc(ex?ex.behavior:'')}</textarea></td>
+      <td><textarea class="qp-listening" rows="2" style="min-width:150px;">${esc(ex?ex.listening:'')}</textarea></td>
+      <td><textarea class="qp-writing" rows="2" style="min-width:150px;">${esc(ex?ex.writing:'')}</textarea></td>
+      <td><input type="date" class="qp-test-date" value="${t?esc(t.date||''):''}" style="width:105px;"></td>
+      <td><input type="number" class="qp-test-obtained" value="${t?esc(t.obtained):''}" style="width:70px;"></td>
+      <td><input type="number" class="qp-test-total" value="${t?esc(t.total):''}" style="width:70px;"></td>
+    </tr>`;
+  });
+  html += `</table>
+  <div style="margin-top:16px;">
+    <button type="button" class="btn-gold" onclick="saveQuickProgressGrid()">Save All "${esc(subject)}" Progress for ${esc(className)}</button>
+  </div>`;
+  wrap.innerHTML = html;
+}
+async function saveQuickProgressGrid(){
+  const session = document.getElementById('qpSession').value.trim();
+  const className = document.getElementById('qpClass').value;
+  const month = document.getElementById('qpMonth').value.trim();
+  const subject = document.getElementById('qpSubject').value;
+  const wrap = document.getElementById('quickProgressGridWrap');
+  if(!session || !className || !month || !subject){ alert('Session, Class, Month aur Subject zaroor bharein.'); return; }
+  let savedCount = 0;
+  wrap.querySelectorAll('tr[data-roll]').forEach(row=>{
+    const rollNo = row.dataset.roll;
+    const learning = row.querySelector('.qp-learning').value.trim();
+    const behavior = row.querySelector('.qp-behavior').value.trim();
+    const listening = row.querySelector('.qp-listening').value.trim();
+    const writing = row.querySelector('.qp-writing').value.trim();
+    const testDate = row.querySelector('.qp-test-date').value;
+    const testObtained = row.querySelector('.qp-test-obtained').value;
+    const testTotal = row.querySelector('.qp-test-total').value;
+    // A completely empty row leaves that student's record untouched, so a
+    // partially-filled class (or a re-save of the same subject) doesn't wipe
+    // out students who genuinely have nothing entered yet.
+    if(!learning && !behavior && !listening && !writing && testObtained==='' && testTotal===''){ return; }
+    const en = DB.enrollments.find(x=>x.rollNo===rollNo && x.session===session && x.className===className);
+    const stu = en ? DB.students.find(s=>s.id===en.studentId) : null;
+    const subjectEntry = {
+      subject, learning, behavior, listening, writing,
+      test: (testObtained!=='' || testTotal!=='') ? { date: testDate, obtained: testObtained, total: testTotal } : null
+    };
+    const idx = DB.progressReports.findIndex(r=>r.rollNo===rollNo && r.session===session && r.className===className && r.month===month);
+    if(idx>=0){
+      const rec = DB.progressReports[idx];
+      const subs = (rec.subjects||[]).filter(s=>s.subject!==subject);
+      subs.push(subjectEntry);
+      rec.subjects = subs;
+    } else {
+      DB.progressReports.push({
+        id: uid(), rollNo, session, className, month,
+        studentName: stu ? stu.name : '',
+        subjects: [subjectEntry], overallRemarks: '',
+        date: new Date().toISOString().slice(0,10)
+      });
+    }
+    savedCount++;
+  });
+  if(!savedCount){ alert('Koi row bhari hui nahi mili &mdash; kam az kam ek student ka data bharein.'); return; }
+  await setData('progressReports', DB.progressReports);
+  alert(`${savedCount} students ke "${subject}" progress save ho gaye.`);
+  const _sy = window.scrollY;
+  renderAdminPanel();
+  window.scrollTo(0, _sy);
+}
 // ============================================================
 // MONTHLY PROGRESS REPORT (subject-wise Learning/Behavior/Listening remarks)
 // ============================================================
