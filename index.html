@@ -869,6 +869,16 @@ function classOptionsHTML(selected){
 // ============================================================
 // Subjects that every class always has — shown checked and locked in Enrollment
 const MANDATORY_SUBJECTS = ['English','Urdu','Math'];
+// The 3 quick-pick options offered for each of Learning/Behavior/Listening/
+// Writing in the Monthly Progress Report, so admin can select instead of
+// typing every time. Used to build a <select> for that field.
+const PROGRESS_RATING_OPTIONS = ['Bohat Acha', 'Acha', 'Mehnat Ki Zaroorat'];
+function progressRatingSelectHTML(cls, current){
+  return `<select class="${cls}">
+    <option value="">-- Select --</option>
+    ${PROGRESS_RATING_OPTIONS.map(o=>`<option value="${esc(o)}" ${current===o?'selected':''}>${esc(o)}</option>`).join('')}
+  </select>`;
+}
 const TERM_ORDER = ['1st Term','2nd Term','3rd Term','Annual'];
 // Each (rollNo, session, term) combination is now its own separate result
 // record, so a student can have up to 4 result documents in one session
@@ -3008,7 +3018,7 @@ function renderAdminPanel(){
 
     <div class="admin-block" style="border:2px solid var(--gold);">
       <h3>Quick Progress Entry &mdash; Poori Class, Ek Subject Ek Sath</h3>
-      <p class="note-inline" style="margin:-6px 0 14px;">Session, Class, Month, aur ek Subject chunein &mdash; neeche us class ke saare students ek row mein aa jayenge, Learning/Behavior/Listening/Writing aur (agar test hua ho) Test Date/Obtained/Total bharein aur ek hi button se poori class ka us subject ka progress save ho jayega. Doosre subject ke liye subject badal kar dobara kar lein. Kisi student ki row khali chhod dein to uski koi purani entry nahi badlegi.</p>
+      <p class="note-inline" style="margin:-6px 0 14px;">Session, Class, Month, aur ek Subject chunein &mdash; neeche us class ke saare students ek row mein aa jayenge. Learning/Behavior/Listening/Writing ke liye bas dropdown se ek option select karein (Bohat Acha / Acha / Mehnat Ki Zaroorat) &mdash; likhna nahi parega. Agar test hua ho to Test Date/Obtained/Total bhi bhar dein. Ek hi button se poori class ka us subject ka progress save ho jayega. Doosre subject ke liye subject badal kar dobara kar lein. Kisi student ki row khali chhod dein to uski koi purani entry nahi badlegi.</p>
       <div class="row-2" style="max-width:700px;">
         <div class="field"><label>Session / Year</label><input required id="qpSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderQuickProgressGrid()"></div>
         <div class="field"><label>Class</label><select required id="qpClass" onchange="renderQuickProgressSubjectPicker()">${classOptionsHTML()}</select></div>
@@ -3022,7 +3032,7 @@ function renderAdminPanel(){
 
     <div class="admin-block">
       <h3>Monthly Progress Report</h3>
-      <p class="note-inline" style="margin:-6px 0 14px;">Select session, class, student, and month &mdash; then, for each of that student's subjects, tick it and write Learning, Behavior, and Listening/Sunna remarks separately. Overall remarks go at the bottom. This shows to the student/parent in the Student Portal (Roll No/B-Form login) &mdash; no photo, just name and father's name.</p>
+      <p class="note-inline" style="margin:-6px 0 14px;">Select session, class, student, and month &mdash; then, for each of that student's subjects, tick it and select Learning, Behavior, Listening/Sunna, and Writing from the dropdown (Bohat Acha / Acha / Mehnat Ki Zaroorat) instead of typing. Overall remarks go at the bottom as free text. This shows to the student/parent in the Student Portal (Roll No/B-Form login) &mdash; no photo, just name and father's name.</p>
       <form id="progressForm">
         <div class="row-2">
           <div class="field"><label>Session / Year</label><input required id="prSession" placeholder="e.g. 2026" value="${new Date().getFullYear()}" oninput="renderProgressStudentPicker()"></div>
@@ -4587,7 +4597,7 @@ function renderQuickProgressGrid(){
       if(r.session===session && r.className===className && r.month===month) existingByRoll[r.rollNo] = r;
     });
   }
-  let html = `<table><tr><th style="min-width:70px;">Roll No</th><th style="min-width:130px;">Name</th><th style="min-width:160px;">Learning</th><th style="min-width:160px;">Behavior</th><th style="min-width:160px;">Listening/Sunna</th><th style="min-width:160px;">Writing</th><th style="min-width:110px;">Test Date</th><th style="min-width:80px;">Obtained</th><th style="min-width:80px;">Total</th></tr>`;
+  let html = `<table><tr><th style="min-width:70px;">Roll No</th><th style="min-width:130px;">Name</th><th style="min-width:120px;">Learning</th><th style="min-width:120px;">Behavior</th><th style="min-width:120px;">Listening/Sunna</th><th style="min-width:120px;">Writing</th><th style="min-width:110px;">Test Date</th><th style="min-width:80px;">Obtained</th><th style="min-width:80px;">Total</th></tr>`;
   enrolled.forEach(en=>{
     const stu = DB.students.find(s=>s.id===en.studentId);
     const rec = existingByRoll[en.rollNo];
@@ -4596,10 +4606,10 @@ function renderQuickProgressGrid(){
     html += `<tr data-roll="${esc(en.rollNo)}">
       <td class="mono">${esc(en.rollNo)}</td>
       <td>${esc(stu?stu.name:'-')}</td>
-      <td><textarea class="qp-learning" rows="2" style="min-width:150px;">${esc(ex?ex.learning:'')}</textarea></td>
-      <td><textarea class="qp-behavior" rows="2" style="min-width:150px;">${esc(ex?ex.behavior:'')}</textarea></td>
-      <td><textarea class="qp-listening" rows="2" style="min-width:150px;">${esc(ex?ex.listening:'')}</textarea></td>
-      <td><textarea class="qp-writing" rows="2" style="min-width:150px;">${esc(ex?ex.writing:'')}</textarea></td>
+      <td>${progressRatingSelectHTML('qp-learning', ex?ex.learning:'')}</td>
+      <td>${progressRatingSelectHTML('qp-behavior', ex?ex.behavior:'')}</td>
+      <td>${progressRatingSelectHTML('qp-listening', ex?ex.listening:'')}</td>
+      <td>${progressRatingSelectHTML('qp-writing', ex?ex.writing:'')}</td>
       <td><input type="date" class="qp-test-date" value="${t?esc(t.date||''):''}" style="width:105px;"></td>
       <td><input type="number" class="qp-test-obtained" value="${t?esc(t.obtained):''}" style="width:70px;"></td>
       <td><input type="number" class="qp-test-total" value="${t?esc(t.total):''}" style="width:70px;"></td>
@@ -4732,10 +4742,10 @@ function renderProgressSubjectPicker(){
         <input type="checkbox" class="pr-subject-check" ${ex?'checked':''} onchange="togglePrSubjectFields(this)"> ${esc(s)}
       </label>
       <div class="pr-subject-fields" style="display:${ex?'block':'none'};margin-top:8px;">
-        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Learning</label><textarea class="pr-learning" rows="2" placeholder="e.g. Naya sabaq acha samajh raha hai">${esc(ex?ex.learning:'')}</textarea></div>
-        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Behavior</label><textarea class="pr-behavior" rows="2" placeholder="e.g. Class mein tawajjo se baithta hai">${esc(ex?ex.behavior:'')}</textarea></div>
-        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Listening / Sunna</label><textarea class="pr-listening" rows="2" placeholder="e.g. Pichla sabaq theek se suna diya">${esc(ex?ex.listening:'')}</textarea></div>
-        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Writing</label><textarea class="pr-writing" rows="2" placeholder="e.g. Likhai saaf aur seedhi ho rahi hai">${esc(ex?ex.writing:'')}</textarea></div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Learning</label>${progressRatingSelectHTML('pr-learning', ex?ex.learning:'')}</div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Behavior</label>${progressRatingSelectHTML('pr-behavior', ex?ex.behavior:'')}</div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Listening / Sunna</label>${progressRatingSelectHTML('pr-listening', ex?ex.listening:'')}</div>
+        <div class="field" style="margin-bottom:8px;"><label style="font-size:12px;">Writing</label>${progressRatingSelectHTML('pr-writing', ex?ex.writing:'')}</div>
         <label style="display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;margin-top:6px;">
           <input type="checkbox" class="pr-test-check" ${ex&&ex.test?'checked':''} onchange="togglePrTestFields(this)" style="width:auto;"> Is month is subject mein test hua
         </label>
