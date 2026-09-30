@@ -2080,6 +2080,7 @@ const SP_POINTS={'Excellent':100,'Well Behaved':100,'Fully Prepared':100,'Neat &
 function spMonthKey(m){ const d=new Date('1 '+m); return isNaN(d)?null:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 // Attendance: sirf Leave/Absent record hota hai, baqi sab din khud Present gine jate hain.
 function spAttendance(r){
+  if(r.att && Number(r.att.days)>0){ const d=Number(r.att.days),ab=Number(r.att.absent||0),lv=Number(r.att.leave||0),pr=Math.max(0,d-ab-lv); return {days:d,present:pr,absent:ab,leave:lv,pct:pr/d*100}; }
   const k=spMonthKey(r.month); if(!k) return null;
   const rows=DB.attendance.filter(a=>a.session===r.session && a.className===r.className && (a.date||'').slice(0,7)===k);
   const days=new Set(rows.map(a=>a.date)).size; if(!days) return null;
@@ -2109,8 +2110,8 @@ function spExtraCells(rr,m,at){ const p=spProgMarks(rr), am=spAttMarks(at); cons
 function spSummaryHTML(r){
   const m=spMarks(r), at=spAttendance(r), ap=r.appearance||{}, p=spProgMarks(r), am=spAttMarks(at);
   const got=m.o+p.got+(am?am.got:0), max=m.t+p.max+(am?am.max:0);
-  return `<div style="overflow-x:auto;"><table style="margin-top:10px;"><tr><th>Test Marks</th><th>Progress Marks (auto)</th><th>Attendance Marks (auto)</th><th>Grand Total</th><th>%</th><th>Attendance P / A / L</th>${APPEARANCE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}<th>Overall Score</th></tr>
-  <tr><td class="mono">${m.t?m.o+' / '+m.t:'-'}</td><td class="mono">${p.max?p.got+' / '+p.max:'-'}</td><td class="mono">${am?am.got+' / '+am.max:'-'}</td><td class="mono"><strong>${max?got.toFixed(1)+' / '+max:'-'}</strong></td><td class="mono">${max?(got/max*100).toFixed(1)+'%':'-'}</td><td class="mono">${at?`${at.present} / ${at.absent} / ${at.leave} (of ${at.days})`:'-'}</td>${APPEARANCE_FIELDS.map(f=>`<td>${esc(ap[f[0]]||'-')}</td>`).join('')}<td class="mono"><strong>${spScore(r).toFixed(1)}</strong></td></tr></table></div>`;
+  return `<div style="overflow-x:auto;"><table style="margin-top:10px;"><tr><th>Test Marks</th><th>Progress Marks (auto)</th><th>Attendance Marks (auto)</th><th>Grand Total</th><th>%</th><th>Attendance P / A / L</th>${APPEARANCE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}<th>Parents Report Lene Aaye</th><th>Overall Score</th></tr>
+  <tr><td class="mono">${m.t?m.o+' / '+m.t:'-'}</td><td class="mono">${p.max?p.got+' / '+p.max:'-'}</td><td class="mono">${am?am.got+' / '+am.max:'-'}</td><td class="mono"><strong>${max?got.toFixed(1)+' / '+max:'-'}</strong></td><td class="mono">${max?(got/max*100).toFixed(1)+'%':'-'}</td><td class="mono">${at?`${at.present} / ${at.absent} / ${at.leave} (of ${at.days})`:'-'}</td>${APPEARANCE_FIELDS.map(f=>`<td>${esc(ap[f[0]]||'-')}</td>`).join('')}<td>${r.parentCame?'&#10004; Haan':'&#10008; Nahi'}</td><td class="mono"><strong>${spScore(r).toFixed(1)}</strong></td></tr></table></div>`;
 }
 function spReports(session,cls,month){ return DB.progressReports.filter(r=>r.session===session && r.className===cls && r.month===month && (r.subjects||[]).length); }
 // Subject-wise: har subject ka alag table, poori class ke students ke sath
@@ -2127,9 +2128,10 @@ function buildAllSubjectsHTML(session,cls,month,only){
   const reps=spReports(session,cls,month); if(!reps.length) return null;
   let subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); })); if(only&&only.length) subs=subs.filter(x=>only.includes(x));
   const rows=[...reps].sort((a,b)=>Number(a.rollNo)-Number(b.rollNo)).map(r=>{ const rr=only&&only.length?{...r,subjects:r.subjects.filter(x=>only.includes(x.subject))}:r; const m=spMarks(rr), at=spAttendance(r);
-    return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td>${subs.map(sb=>{const x=r.subjects.find(y=>y.subject===sb);return `<td class="mono">${x&&x.test?esc(x.test.obtained||0)+'/'+esc(x.test.total||0):'-'}</td>`;}).join('')}<td class="mono">${m.t?m.o+'/'+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td>${spExtraCells(rr,m,at)}<td class="mono">${at?at.present:'-'}</td><td class="mono">${at?at.absent:'-'}</td><td class="mono">${at?at.leave:'-'}</td></tr>`; }).join('');
-  return `${schoolBrandHTML('Monthly Test Report (All Subjects) — Class '+cls+' · '+month+' · '+session)}<div style="overflow-x:auto;"><table><tr><th>Roll</th><th>Student</th>${subs.map(x=>`<th>${esc(x)}</th>`).join('')}<th>Test Total</th><th>Test %</th><th>Progress Marks</th><th>Attendance Marks</th><th>Grand Total</th><th>Grand %</th><th>Present</th><th>Absent</th><th>Leave</th></tr>${rows}</table></div>`;
+    return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td>${subs.map(sb=>{const x=r.subjects.find(y=>y.subject===sb);return `<td class="mono">${x&&x.test?esc(x.test.obtained||0)+'/'+esc(x.test.total||0):'-'}</td>`;}).join('')}<td class="mono">${m.t?m.o+'/'+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td>${spExtraCells(rr,m,at)}<td class="mono">${at?at.present:'-'}</td><td class="mono">${at?at.absent:'-'}</td><td class="mono">${at?at.leave:'-'}</td><td style="text-align:center;">${r.parentCame?'&#10004;':'&#10008;'}</td></tr>`; }).join('');
+  return `${schoolBrandHTML('Monthly Test Report (All Subjects) — Class '+cls+' · '+month+' · '+session)}<div style="overflow-x:auto;"><table><tr><th>Roll</th><th>Student</th>${subs.map(x=>`<th>${esc(x)}</th>`).join('')}<th>Test Total</th><th>Test %</th><th>Progress Marks</th><th>Attendance Marks</th><th>Grand Total</th><th>Grand %</th><th>Present</th><th>Absent</th><th>Leave</th><th>Parents Aaye</th></tr>${rows}</table></div>${spParentsSummary(reps)}`;
 }
+function spParentsSummary(reps){ const came=reps.filter(r=>r.parentCame), not=reps.filter(r=>!r.parentCame); return `<div class="gazette-block" style="margin-top:12px;"><strong>Parents report lene aaye:</strong> ${came.length} &nbsp;|&nbsp; <strong>Nahi aaye:</strong> ${not.length}${not.length?'<br><span class="note-inline">Nahi aaye: '+not.map(r=>esc(r.studentName)).join(', ')+'</span>':''}</div>`; }
 // Student of the Month (class) - reports dekh kar highest overall score
 function spTopOfClass(session,cls,month){ const reps=spReports(session,cls,month); if(!reps.length) return null; return reps.map(r=>({r,sc:spScore(r)})).sort((a,b)=>b.sc-a.sc)[0]; }
 function spStarsHTML(session,cls,month){
@@ -2184,14 +2186,19 @@ renderQuickProgressGrid=function(){
       <td class="qp-c-test"><input type="date" class="qp-test-date" value="${t?esc(t.date||''):''}" style="width:105px;"></td><td class="qp-c-test"><input type="number" class="qp-test-obtained" value="${t?esc(t.obtained):''}" style="width:70px;"></td><td class="qp-c-test"><input type="number" class="qp-test-total" value="${t?esc(t.total):''}" style="width:70px;"></td></tr>`; });
     h+='</table></div>';
   });
+  const anyAtt=Object.values(ex).find(r=>r.att&&r.att.days);
+  h+=`<div style="margin:14px 0;"><h4 style="margin:8px 0;">Attendance (is month ki) &mdash; sirf Absent aur Leave likhein, Present khud ban jayega</h4><div class="field" style="max-width:260px;"><label>Kul Working Days</label><input type="number" min="0" id="qpAttDays" value="${anyAtt?esc(anyAtt.att.days):''}" oninput="qpAttCalc()"></div><table><tr><th>Roll No</th><th>Name</th><th>Absent</th><th>Leave</th><th>Present (auto)</th><th>Parents aaye <input type="checkbox" title="Sab" onchange="document.querySelectorAll('.qp-pc').forEach(c=>c.checked=this.checked)"></th></tr>${enrolled.map(en=>{ const stu=DB.students.find(x=>x.id===en.studentId); const rec=ex[en.rollNo]; const a=rec?spAttendance(rec):null; return `<tr data-att-roll="${esc(en.rollNo)}"><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td><td><input type="number" min="0" class="qp-abs" value="${a?a.absent:''}" oninput="qpAttCalc()" style="width:70px;"></td><td><input type="number" min="0" class="qp-lv" value="${a?a.leave:''}" oninput="qpAttCalc()" style="width:70px;"></td><td class="mono qp-pres">-</td><td style="text-align:center;"><input type="checkbox" class="qp-pc" ${rec&&rec.parentCame?'checked':''} style="width:auto;"></td></tr>`; }).join('')}</table></div>`;
   h+=`<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn-gold" onclick="saveQuickProgressAll()">Save Selected Subjects &amp; Report Banayen</button><button type="button" class="tag-btn ghost" onclick="qpShowReport(true)">Sirf Report Dekhein</button></div><div id="qpReportBox" style="margin-top:18px;"></div>`;
-  wrap.innerHTML=h; qpApplyView();
+  wrap.innerHTML=h; qpApplyView(); qpAttCalc();
 };
+function qpAttCalc(){ const d=Number((document.getElementById('qpAttDays')||{}).value||0); document.querySelectorAll('#quickProgressGridWrap tr[data-att-roll]').forEach(r=>{ const ab=Number(r.querySelector('.qp-abs').value||0), lv=Number(r.querySelector('.qp-lv').value||0); r.querySelector('.qp-pres').textContent = d>0 ? Math.max(0,d-ab-lv) : '-'; }); }
 async function saveQuickProgressAll(){
   const g=id=>document.getElementById(id).value.trim();
   const session=g('qpSession'), className=g('qpClass'), month=g('qpMonth');
   if(!session||!className||!month){ alert('Session, Class aur Month zaroor bharein.'); return; }
-  if(!qpSel.length){ alert('Pehle kam az kam ek subject par click karein.'); return; }
+  const attDays=Number((document.getElementById('qpAttDays')||{}).value||0);
+  const anyTick=[...document.querySelectorAll('#quickProgressGridWrap .qp-pc')].some(c=>c.checked);
+  if(!qpSel.length && !attDays && !anyTick){ alert('Pehle kam az kam ek subject par click karein, ya Kul Working Days bharein.'); return; }
   let n=0;
   document.querySelectorAll('#quickProgressGridWrap .qp-block').forEach(block=>{
     const subject=block.dataset.subject; if(!qpSel.includes(subject)) return;
@@ -2208,6 +2215,14 @@ async function saveQuickProgressAll(){
       n++;
     });
   });
+  document.querySelectorAll('#quickProgressGridWrap tr[data-att-roll]').forEach(row=>{
+    const rollNo=row.dataset.attRoll, chk=row.querySelector('.qp-pc').checked;
+    let idx=DB.progressReports.findIndex(r=>r.rollNo===rollNo&&r.session===session&&r.className===className&&r.month===month);
+    if(idx<0 && !(attDays>0 || chk)) return;
+    if(idx<0){ const en=DB.enrollments.find(x=>x.rollNo===rollNo&&x.session===session&&x.className===className); const stu=en?DB.students.find(x=>x.id===en.studentId):null;
+      DB.progressReports.push({id:uid(),rollNo,session,className,month,studentName:stu?stu.name:'',subjects:[],overallRemarks:'',date:new Date().toISOString().slice(0,10)}); idx=DB.progressReports.length-1; }
+    if(attDays>0) DB.progressReports[idx].att={days:attDays,absent:Number(row.querySelector('.qp-abs').value||0),leave:Number(row.querySelector('.qp-lv').value||0)};
+    DB.progressReports[idx].parentCame=chk; n++; });
   if(!n){ alert('Koi row bhari hui nahi mili.'); return; }
   await setData('progressReports',DB.progressReports);
   alert(n+' subject-entries save ho gayi. Neeche report ban gayi hai.');
@@ -3305,6 +3320,7 @@ function renderAdminPanel(){
           </select>
         </div>
         <div id="progressSubjectPicker"></div>
+        <div class="field"><label>Attendance (is month ki) &mdash; Absent/Leave likhein, Present khud ban jayega</label><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;"><input type="number" min="0" id="prAttDays" placeholder="Kul Working Days"><input type="number" min="0" id="prAttAbs" placeholder="Absent"><input type="number" min="0" id="prAttLeave" placeholder="Leave"></div><label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-weight:600;"><input type="checkbox" id="prParentCame" style="width:auto;"> Parents monthly report lene school aaye</label></div>
         <div class="field"><label>Uniform / Appearance (bache ka uniform waghera)</label><div id="prAppearance" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${APPEARANCE_FIELDS.map(f=>`<div><label style="font-size:12px;">${f[1]}</label><select class="pr-app" data-key="${f[0]}"><option value="">-- Select --</option>${APPEARANCE_OPTS.map(o=>`<option>${o}</option>`).join('')}</select></div>`).join('')}</div></div>
         <div class="field"><label>Overall Remarks</label><textarea id="prOverall" rows="3" placeholder="Overall progress, general behavior, attendance etc."></textarea></div>
         <div style="margin-top:16px;">
@@ -3963,6 +3979,7 @@ function renderAdminPanel(){
     });
     const overallRemarks = document.getElementById('prOverall').value.trim();
     const appearance = {}; document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ if(x.value) appearance[x.dataset.key]=x.value; });
+    const _ad=Number(document.getElementById('prAttDays').value||0); const att=_ad>0?{days:_ad,absent:Number(document.getElementById('prAttAbs').value||0),leave:Number(document.getElementById('prAttLeave').value||0)}:null;
     const editId = progressEditingId;
     const existingIdx = editId
       ? DB.progressReports.findIndex(r=>r.id===editId)
@@ -3971,7 +3988,7 @@ function renderAdminPanel(){
       id: existingIdx>=0 ? DB.progressReports[existingIdx].id : uid(),
       rollNo, session, className, month,
       studentName: stu ? stu.name : (existingIdx>=0 ? DB.progressReports[existingIdx].studentName : ''),
-      subjects, overallRemarks, appearance,
+      subjects, overallRemarks, appearance, parentCame: document.getElementById('prParentCame').checked, att: att || (existingIdx>=0 ? DB.progressReports[existingIdx].att : undefined),
       date: new Date().toISOString().slice(0,10)
     };
     if(existingIdx>=0) DB.progressReports[existingIdx] = record; else DB.progressReports.push(record);
@@ -5005,8 +5022,12 @@ function renderProgressSubjectPicker(){
     progressEditingId = existing.id;
     document.getElementById('prOverall').value = existing.overallRemarks || '';
     document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ x.value=(existing.appearance||{})[x.dataset.key]||''; });
+    const _a=spAttendance(existing); document.getElementById('prAttDays').value=_a?_a.days:''; document.getElementById('prAttAbs').value=_a?_a.absent:''; document.getElementById('prAttLeave').value=_a?_a.leave:'';
+    document.getElementById('prParentCame').checked=!!existing.parentCame;
   } else {
+    document.getElementById('prParentCame').checked=false;
     document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ x.value=''; });
+    ['prAttDays','prAttAbs','prAttLeave'].forEach(i=>document.getElementById(i).value='');
     progressEditingId = null;
     document.getElementById('prOverall').value = '';
   }
