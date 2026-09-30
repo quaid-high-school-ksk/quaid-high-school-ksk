@@ -2098,28 +2098,37 @@ function spScore(r){
   if(ap.length) parts.push([ap.reduce((x,y)=>x+y,0)/ap.length,10]);
   const w=parts.reduce((x,y)=>x+y[1],0); return w?parts.reduce((x,y)=>x+y[0]*y[1],0)/w:0;
 }
+// ===== AUTO MARKS: option ke hisaab se marks + attendance marks (yahan number badal sakte hain) =====
+const MARK_SCHEME={top:10,mid:6,low:3,attMax:20}; // har rating field: Excellent=10, Good/Average=6, Needs Improvement=3 | Attendance total 20
+const MARK_TIER={'Excellent':'top','Well Behaved':'top','Fully Prepared':'top','Neat & Clean':'top','Good':'mid','Average':'mid','Partially Prepared':'mid','Needs Improvement':'low','Misbehaves':'low','Not Prepared':'low'};
+function spOptMarks(s){ let got=0,max=0; ['learning','behavior','listening','writing'].forEach(f=>{ const t=MARK_TIER[s[f]]; if(t){ got+=MARK_SCHEME[t]; max+=MARK_SCHEME.top; } }); return {got,max}; }
+function spProgMarks(r){ let got=0,max=0; (r.subjects||[]).forEach(s=>{ const o=spOptMarks(s); got+=o.got; max+=o.max; }); return {got,max}; }
+function spAttMarks(a){ return a?{got:Math.round(a.pct/100*MARK_SCHEME.attMax*10)/10,max:MARK_SCHEME.attMax}:null; }
+function spExtraCells(rr,m,at){ const p=spProgMarks(rr), am=spAttMarks(at); const got=m.o+p.got+(am?am.got:0), max=m.t+p.max+(am?am.max:0);
+  return `<td class="mono">${p.max?p.got+'/'+p.max:'-'}</td><td class="mono">${am?am.got+'/'+am.max:'-'}</td><td class="mono"><strong>${max?got.toFixed(1)+'/'+max:'-'}</strong></td><td class="mono">${max?(got/max*100).toFixed(1)+'%':'-'}</td>`; }
 function spSummaryHTML(r){
-  const m=spMarks(r), a=spAttendance(r), ap=r.appearance||{};
-  return `<table style="margin-top:10px;"><tr><th>Total Marks</th><th>Percentage</th><th>Attendance (Present / Absent / Leave)</th>${APPEARANCE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}<th>Overall Score</th></tr>
-  <tr><td class="mono">${m.t?m.o+' / '+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td><td class="mono">${a?`${a.present} / ${a.absent} / ${a.leave} (of ${a.days} days)`:'-'}</td>${APPEARANCE_FIELDS.map(f=>`<td>${esc(ap[f[0]]||'-')}</td>`).join('')}<td class="mono"><strong>${spScore(r).toFixed(1)}</strong></td></tr></table>`;
+  const m=spMarks(r), at=spAttendance(r), ap=r.appearance||{}, p=spProgMarks(r), am=spAttMarks(at);
+  const got=m.o+p.got+(am?am.got:0), max=m.t+p.max+(am?am.max:0);
+  return `<div style="overflow-x:auto;"><table style="margin-top:10px;"><tr><th>Test Marks</th><th>Progress Marks (auto)</th><th>Attendance Marks (auto)</th><th>Grand Total</th><th>%</th><th>Attendance P / A / L</th>${APPEARANCE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}<th>Overall Score</th></tr>
+  <tr><td class="mono">${m.t?m.o+' / '+m.t:'-'}</td><td class="mono">${p.max?p.got+' / '+p.max:'-'}</td><td class="mono">${am?am.got+' / '+am.max:'-'}</td><td class="mono"><strong>${max?got.toFixed(1)+' / '+max:'-'}</strong></td><td class="mono">${max?(got/max*100).toFixed(1)+'%':'-'}</td><td class="mono">${at?`${at.present} / ${at.absent} / ${at.leave} (of ${at.days})`:'-'}</td>${APPEARANCE_FIELDS.map(f=>`<td>${esc(ap[f[0]]||'-')}</td>`).join('')}<td class="mono"><strong>${spScore(r).toFixed(1)}</strong></td></tr></table></div>`;
 }
 function spReports(session,cls,month){ return DB.progressReports.filter(r=>r.session===session && r.className===cls && r.month===month && (r.subjects||[]).length); }
 // Subject-wise: har subject ka alag table, poori class ke students ke sath
-function buildSubjectWiseHTML(session,cls,month){
+function buildSubjectWiseHTML(session,cls,month,only){
   const reps=spReports(session,cls,month); if(!reps.length) return null;
-  const subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); }));
+  let subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); })); if(only&&only.length) subs=subs.filter(x=>only.includes(x));
   const blocks=subs.map(sub=>{
     const rows=reps.map(r=>({r,s:r.subjects.find(x=>x.subject===sub)})).filter(x=>x.s).sort((a,b)=>(a.r.studentName||'').localeCompare(b.r.studentName||''));
-    return `<div class="gazette-block" style="margin-bottom:22px;"><h3>${esc(sub)}</h3><table><tr><th>Roll</th><th>Student</th><th>Learning</th><th>Behavior</th><th>Listening</th><th>Writing</th><th>Marks</th><th>Attendance P/A/L</th></tr>${rows.map(({r,s})=>{const at=spAttendance(r);return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${s.test?esc(s.test.obtained||0)+' / '+esc(s.test.total||0):'-'}</td><td class="mono">${at?at.present+' / '+at.absent+' / '+at.leave:'-'}</td></tr>`;}).join('')}</table></div>`;
+    return `<div class="gazette-block" style="margin-bottom:22px;"><h3>${esc(sub)}</h3><table><tr><th>Roll</th><th>Student</th><th>Learning</th><th>Behavior</th><th>Listening</th><th>Writing</th><th>Test Marks</th><th>Progress Marks (auto)</th><th>Attendance P/A/L</th></tr>${rows.map(({r,s})=>{const at=spAttendance(r);return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${s.test?esc(s.test.obtained||0)+' / '+esc(s.test.total||0):'-'}</td><td class="mono">${(()=>{const o=spOptMarks(s);return o.max?o.got+'/'+o.max:'-';})()}</td><td class="mono">${at?at.present+' / '+at.absent+' / '+at.leave:'-'}</td></tr>`;}).join('')}</table></div>`;
   }).join('');
-  return `${schoolBrandHTML('Subject-wise Report &mdash; Class '+esc(cls)+' &middot; '+esc(month)+' &middot; '+esc(session))}${blocks}`;
+  return `${schoolBrandHTML('Subject-wise Report — Class '+cls+' · '+month+' · '+session)}${blocks}`;
 }
-function buildAllSubjectsHTML(session,cls,month){
+function buildAllSubjectsHTML(session,cls,month,only){
   const reps=spReports(session,cls,month); if(!reps.length) return null;
-  const subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); }));
-  const rows=[...reps].sort((a,b)=>Number(a.rollNo)-Number(b.rollNo)).map(r=>{ const m=spMarks(r), at=spAttendance(r);
-    return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td>${subs.map(sb=>{const x=r.subjects.find(y=>y.subject===sb);return `<td class="mono">${x&&x.test?esc(x.test.obtained||0)+'/'+esc(x.test.total||0):'-'}</td>`;}).join('')}<td class="mono">${m.t?m.o+'/'+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td><td class="mono">${at?at.present:'-'}</td><td class="mono">${at?at.absent:'-'}</td><td class="mono">${at?at.leave:'-'}</td></tr>`; }).join('');
-  return `${schoolBrandHTML('Monthly Test Report (All Subjects) &mdash; Class '+esc(cls)+' &middot; '+esc(month)+' &middot; '+esc(session))}<div style="overflow-x:auto;"><table><tr><th>Roll</th><th>Student</th>${subs.map(x=>`<th>${esc(x)}</th>`).join('')}<th>Total</th><th>%</th><th>Present</th><th>Absent</th><th>Leave</th></tr>${rows}</table></div>`;
+  let subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); })); if(only&&only.length) subs=subs.filter(x=>only.includes(x));
+  const rows=[...reps].sort((a,b)=>Number(a.rollNo)-Number(b.rollNo)).map(r=>{ const rr=only&&only.length?{...r,subjects:r.subjects.filter(x=>only.includes(x.subject))}:r; const m=spMarks(rr), at=spAttendance(r);
+    return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td>${subs.map(sb=>{const x=r.subjects.find(y=>y.subject===sb);return `<td class="mono">${x&&x.test?esc(x.test.obtained||0)+'/'+esc(x.test.total||0):'-'}</td>`;}).join('')}<td class="mono">${m.t?m.o+'/'+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td>${spExtraCells(rr,m,at)}<td class="mono">${at?at.present:'-'}</td><td class="mono">${at?at.absent:'-'}</td><td class="mono">${at?at.leave:'-'}</td></tr>`; }).join('');
+  return `${schoolBrandHTML('Monthly Test Report (All Subjects) — Class '+cls+' · '+month+' · '+session)}<div style="overflow-x:auto;"><table><tr><th>Roll</th><th>Student</th>${subs.map(x=>`<th>${esc(x)}</th>`).join('')}<th>Test Total</th><th>Test %</th><th>Progress Marks</th><th>Attendance Marks</th><th>Grand Total</th><th>Grand %</th><th>Present</th><th>Absent</th><th>Leave</th></tr>${rows}</table></div>`;
 }
 // Student of the Month (class) - reports dekh kar highest overall score
 function spTopOfClass(session,cls,month){ const reps=spReports(session,cls,month); if(!reps.length) return null; return reps.map(r=>({r,sc:spScore(r)})).sort((a,b)=>b.sc-a.sc)[0]; }
@@ -2144,6 +2153,74 @@ function renderHomeSOM(){
   <h3 style="margin-top:14px;">&#128218; Subject-wise Average (Test Marks)</h3><table><tr><th>Class</th><th>Subjects</th></tr>${subjRows}</table></div>`;
 }
 const _afvOrig=applyFeatureVisibility; applyFeatureVisibility=function(){ _afvOrig(); try{ renderHomeSOM(); }catch(e){ console.error(e); } };
+
+// ===== ALL SUBJECTS ONE-CLICK (Quick Progress Entry) =====
+let qpView='all'; let qpSel=[];
+function qpToggleSub(name,btn){ const i=qpSel.indexOf(name); if(i>=0) qpSel.splice(i,1); else qpSel.push(name); qpSyncSel(); }
+function qpSelectAll(on){ qpSel = on ? Array.from(document.querySelectorAll('#quickProgressGridWrap .qp-block')).map(b=>b.dataset.subject) : []; qpSyncSel(); }
+function qpSyncSel(){ document.querySelectorAll('#quickProgressGridWrap .qp-block').forEach(b=>{ b.style.display=qpSel.includes(b.dataset.subject)?'':'none'; }); document.querySelectorAll('#quickProgressGridWrap .qp-chip').forEach(c=>c.classList.toggle('active',qpSel.includes(c.dataset.subject))); }
+function qpApplyView(){ const w=document.getElementById('quickProgressGridWrap'); if(!w) return;
+  w.querySelectorAll('.qp-c-prog').forEach(e=>e.style.display=qpView==='test'?'none':'');
+  w.querySelectorAll('.qp-c-test').forEach(e=>e.style.display=qpView==='prog'?'none':''); }
+function qpSetView(v){ qpView=v; qpApplyView(); }
+const _qpGridOne=renderQuickProgressGrid;
+renderQuickProgressGrid=function(){
+  const g=id=>((document.getElementById(id)||{}).value||'').trim();
+  if(g('qpSubject')!=='__ALL__') return _qpGridOne();
+  const session=g('qpSession'), className=g('qpClass'), month=g('qpMonth'), wrap=document.getElementById('quickProgressGridWrap');
+  if(!wrap) return; if(!session||!className){ wrap.innerHTML=''; return; }
+  const enrolled=DB.enrollments.filter(en=>en.className===className&&en.session===session).sort((a,b)=>(a.rollNo||'').localeCompare(b.rollNo||'',undefined,{numeric:true}));
+  if(!enrolled.length){ wrap.innerHTML='<div class="empty">Is class/session mein koi enrolled student nahi mila.</div>'; return; }
+  const subs=Array.from(new Set([...MANDATORY_SUBJECTS,...(DB.classSubjects[className]||[])]));
+  const ex={}; if(month) DB.progressReports.forEach(r=>{ if(r.session===session&&r.className===className&&r.month===month) ex[r.rollNo]=r; });
+  let h=`<div style="margin-bottom:12px;"><label style="font-weight:600;">Report ka hissa (filter): </label><select onchange="qpSetView(this.value)"><option value="all" ${qpView==='all'?'selected':''}>Sab kuch (Progress + Test)</option><option value="test" ${qpView==='test'?'selected':''}>Sirf Test Marks</option><option value="prog" ${qpView==='prog'?'selected':''}>Sirf Progress (bina test)</option></select></div>`;
+  qpSel=qpSel.filter(x=>subs.includes(x));
+  h+=`<p class="note-inline" style="margin:0 0 6px;">Jin subjects ki report banani hai un par click karein (dobara click se hat jayega):</p><div class="filter-chips" style="margin-bottom:12px;">${subs.map(x=>`<button type="button" class="chip qp-chip ${qpSel.includes(x)?'active':''}" data-subject="${esc(x)}" onclick="qpToggleSub(this.dataset.subject)">${esc(x)}</button>`).join('')}<button type="button" class="chip" onclick="qpSelectAll(true)">&#10003; Sab Select</button><button type="button" class="chip" onclick="qpSelectAll(false)">Clear</button></div><div style="margin-bottom:12px;"><button type="button" class="btn-gold" onclick="saveQuickProgressAll()">Save Selected Subjects &amp; Report Banayen</button></div>`;
+  subs.forEach(sub=>{
+    h+=`<div class="qp-block" data-subject="${esc(sub)}" style="margin-bottom:18px;display:${qpSel.includes(sub)?'block':'none'};"><h4 style="margin:8px 0;">${esc(sub)}</h4><table><tr><th>Roll No</th><th>Name</th><th class="qp-c-prog">Learning</th><th class="qp-c-prog">Behavior</th><th class="qp-c-prog">Listening/Sunna</th><th class="qp-c-prog">Writing</th><th class="qp-c-test">Test Date</th><th class="qp-c-test">Obtained</th><th class="qp-c-test">Total</th></tr>`;
+    enrolled.forEach(en=>{ const stu=DB.students.find(x=>x.id===en.studentId); const rec=ex[en.rollNo]; const e=rec?(rec.subjects||[]).find(x=>x.subject===sub):null; const t=e&&e.test;
+      h+=`<tr data-roll="${esc(en.rollNo)}"><td class="mono">${esc(en.rollNo)}</td><td>${esc(stu?stu.name:'-')}</td>
+      <td class="qp-c-prog">${progressRatingSelectHTML('qp-learning','learning',e?e.learning:'')}</td><td class="qp-c-prog">${progressRatingSelectHTML('qp-behavior','behavior',e?e.behavior:'')}</td><td class="qp-c-prog">${progressRatingSelectHTML('qp-listening','listening',e?e.listening:'')}</td><td class="qp-c-prog">${progressRatingSelectHTML('qp-writing','writing',e?e.writing:'')}</td>
+      <td class="qp-c-test"><input type="date" class="qp-test-date" value="${t?esc(t.date||''):''}" style="width:105px;"></td><td class="qp-c-test"><input type="number" class="qp-test-obtained" value="${t?esc(t.obtained):''}" style="width:70px;"></td><td class="qp-c-test"><input type="number" class="qp-test-total" value="${t?esc(t.total):''}" style="width:70px;"></td></tr>`; });
+    h+='</table></div>';
+  });
+  h+=`<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap;"><button type="button" class="btn-gold" onclick="saveQuickProgressAll()">Save Selected Subjects &amp; Report Banayen</button><button type="button" class="tag-btn ghost" onclick="qpShowReport(true)">Sirf Report Dekhein</button></div><div id="qpReportBox" style="margin-top:18px;"></div>`;
+  wrap.innerHTML=h; qpApplyView();
+};
+async function saveQuickProgressAll(){
+  const g=id=>document.getElementById(id).value.trim();
+  const session=g('qpSession'), className=g('qpClass'), month=g('qpMonth');
+  if(!session||!className||!month){ alert('Session, Class aur Month zaroor bharein.'); return; }
+  if(!qpSel.length){ alert('Pehle kam az kam ek subject par click karein.'); return; }
+  let n=0;
+  document.querySelectorAll('#quickProgressGridWrap .qp-block').forEach(block=>{
+    const subject=block.dataset.subject; if(!qpSel.includes(subject)) return;
+    block.querySelectorAll('tr[data-roll]').forEach(row=>{
+      const q=c=>row.querySelector(c).value.trim();
+      const learning=q('.qp-learning'),behavior=q('.qp-behavior'),listening=q('.qp-listening'),writing=q('.qp-writing'),td=row.querySelector('.qp-test-date').value,to=row.querySelector('.qp-test-obtained').value,tt=row.querySelector('.qp-test-total').value;
+      if(!learning&&!behavior&&!listening&&!writing&&to===''&&tt==='') return;
+      const rollNo=row.dataset.roll;
+      const en=DB.enrollments.find(x=>x.rollNo===rollNo&&x.session===session&&x.className===className); const stu=en?DB.students.find(x=>x.id===en.studentId):null;
+      const entry={subject,learning,behavior,listening,writing,test:(to!==''||tt!=='')?{date:td,obtained:to,total:tt}:null};
+      const idx=DB.progressReports.findIndex(r=>r.rollNo===rollNo&&r.session===session&&r.className===className&&r.month===month);
+      if(idx>=0){ const rec=DB.progressReports[idx]; rec.subjects=(rec.subjects||[]).filter(x=>x.subject!==subject).concat(entry); }
+      else DB.progressReports.push({id:uid(),rollNo,session,className,month,studentName:stu?stu.name:'',subjects:[entry],overallRemarks:'',date:new Date().toISOString().slice(0,10)});
+      n++;
+    });
+  });
+  if(!n){ alert('Koi row bhari hui nahi mili.'); return; }
+  await setData('progressReports',DB.progressReports);
+  alert(n+' subject-entries save ho gayi. Neeche report ban gayi hai.');
+  renderAdminPanelKeep(); qpShowReport(false);
+}
+function qpShowReport(scroll){
+  const g=id=>((document.getElementById(id)||{}).value||'').trim();
+  const session=g('qpSession'),className=g('qpClass'),month=g('qpMonth'), box=document.getElementById('qpReportBox'); if(!box) return;
+  const only=qpSel.slice(); const a=month?buildAllSubjectsHTML(session,className,month,only):null;
+  if(!a){ box.innerHTML='<div class="empty">Is class/month ka abhi koi saved record nahi hai.</div>'; return; }
+  box.innerHTML=`<div id="qpReportPrint">${a}${qpView==='test'?'':buildSubjectWiseHTML(session,className,month,only)}${spStarsHTML(session,className,month)}</div><div style="margin-top:14px;"><button class="tag-btn ghost" onclick="printHTML(document.getElementById('qpReportPrint').outerHTML)">Print</button></div>`;
+  if(scroll) box.scrollIntoView({behavior:'smooth'});
+}
 function populateGazetteFilters(){
   const sessions = Array.from(new Set(DB.enrollments.map(e=>e.session).filter(Boolean))).sort().reverse();
   const sel = document.getElementById('gzSession');
@@ -4757,7 +4834,7 @@ function renderQuickProgressSubjectPicker(){
     document.getElementById('quickProgressGridWrap').innerHTML = '';
     return;
   }
-  sel.innerHTML = subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  sel.innerHTML = '<option value="__ALL__">&#128203; All Subjects (ek click mein poori report)</option>' + subs.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
   renderQuickProgressGrid();
 }
 function renderQuickProgressGrid(){
