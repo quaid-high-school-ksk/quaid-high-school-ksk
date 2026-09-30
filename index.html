@@ -264,7 +264,7 @@
     <div class="nav-dropdown-menu">
       <button data-tab="datesheet">Date Sheet</button>
       <button data-tab="gazette" id="navGazetteBtn">Result Gazette</button>
-      <button data-tab="progresspublic" id="navProgressPublicBtn">Monthly Progress</button>
+      <button data-tab="progresspublic" id="navProgressPublicBtn">Monthly Test Report</button>
       <button data-tab="calendar">Academic Calendar</button>
       <button data-tab="notes">Study Notes</button>
       <button data-tab="pairing">Pairing Scheme</button>
@@ -290,6 +290,7 @@
 
   <!-- HOME -->
   <section class="tab active" id="tab-home">
+    <div id="homeSOM"></div>
     <div id="homeFeeWidgetWrap"></div>
     <div class="hero">
       <div class="eyebrow">Welcome to</div>
@@ -355,8 +356,8 @@
       </div>
       <div class="quick-card" id="homeProgressCard">
         <div class="badge">M</div>
-        <h3>Monthly Progress</h3>
-        <p>Class-wise monthly progress &mdash; Learning, Behavior, Listening and Writing for every student.</p>
+        <h3>Monthly Test Report</h3>
+        <p>Class-wise monthly test report, subject-wise &amp; all subjects, with attendance &mdash; progress &mdash; Learning, Behavior, Listening and Writing for every student.</p>
         <button data-goto="progresspublic">View progress &rarr;</button>
       </div>
       <div class="quick-card">
@@ -578,6 +579,7 @@
       <div class="field"><label>Class</label><select id="ppClass"></select></div>
     </div>
     <div class="field" style="max-width:520px;"><label>Month / Period</label><input id="ppMonth" placeholder="e.g. September 2026"></div>
+    <div class="field" style="max-width:520px;"><label>Report Type</label><select id="ppView"><option value="student">Student-wise (poori report)</option><option value="subject">Subject-wise (har subject ka alag table)</option><option value="all">All Subjects (ek table mein, attendance ke sath)</option></select></div>
     <button class="btn-gold" onclick="renderProgressPublic()">Show Progress</button>
     <div id="progressPublicOutput" style="margin-top:20px;"></div>
   </section>
@@ -2046,6 +2048,7 @@ function buildProgressPublicHTML(session, className, month){
           return `<tr><td>${esc(s.subject)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${testCell}</td></tr>`;
         }).join('')}
       </table>
+      ${spSummaryHTML(r)}
       ${r.overallRemarks ? `<p style="margin-top:10px;"><strong>Overall Remarks:</strong> ${esc(r.overallRemarks)}</p>` : ''}
     </div>`;
   }).join('');
@@ -2057,7 +2060,9 @@ function renderProgressPublic(){
   const month = document.getElementById('ppMonth').value.trim();
   const out = document.getElementById('progressPublicOutput');
   if(!session || !className || !month){ out.innerHTML = '<div class="msg-err">Session, Class aur Month teeno select/likh dein.</div>'; return; }
-  const html = buildProgressPublicHTML(session, className, month);
+  const v = document.getElementById('ppView').value;
+  const base = v==='subject' ? buildSubjectWiseHTML(session, className, month) : (v==='all' ? buildAllSubjectsHTML(session, className, month) : buildProgressPublicHTML(session, className, month));
+  const html = base ? base + spStarsHTML(session, className, month) : null;
   if(!html){
     out.innerHTML = '<div class="empty">Is class, session aur month ke liye abhi progress report available nahi hai.</div>';
     return;
@@ -2067,6 +2072,78 @@ function renderProgressPublic(){
     <button class="tag-btn ghost" onclick="printHTML(document.getElementById('progressPublicPrintable').outerHTML)">Print</button>
   </div>`;
 }
+
+// ===== MONTHLY REPORT EXTRAS: attendance, uniform, subject-wise, Student of the Month/School =====
+const APPEARANCE_FIELDS=[['uniform','Uniform'],['shoes','Shoes'],['hairNails','Hair / Nails'],['bag','Bag / Books']];
+const APPEARANCE_OPTS=['Excellent','Good','Needs Improvement'];
+const SP_POINTS={'Excellent':100,'Well Behaved':100,'Fully Prepared':100,'Neat & Clean':100,'Good':75,'Average':60,'Partially Prepared':60,'Needs Improvement':30,'Misbehaves':20,'Not Prepared':20};
+function spMonthKey(m){ const d=new Date('1 '+m); return isNaN(d)?null:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+// Attendance: sirf Leave/Absent record hota hai, baqi sab din khud Present gine jate hain.
+function spAttendance(r){
+  const k=spMonthKey(r.month); if(!k) return null;
+  const rows=DB.attendance.filter(a=>a.session===r.session && a.className===r.className && (a.date||'').slice(0,7)===k);
+  const days=new Set(rows.map(a=>a.date)).size; if(!days) return null;
+  const mine=rows.filter(a=>a.rollNo===r.rollNo);
+  const absent=mine.filter(a=>a.status==='absent').length, leave=mine.filter(a=>a.status==='leave').length;
+  const present=Math.max(0,days-absent-leave);
+  return {days,present,absent,leave,pct:present/days*100};
+}
+function spMarks(r){ let o=0,t=0; (r.subjects||[]).forEach(s=>{ if(s.test){ o+=Number(s.test.obtained||0); t+=Number(s.test.total||0);} }); return {o,t,pct:t?o/t*100:null}; }
+function spScore(r){
+  const parts=[]; const m=spMarks(r); if(m.pct!=null) parts.push([m.pct,30]);
+  const q=[]; (r.subjects||[]).forEach(s=>['learning','behavior','listening','writing'].forEach(f=>{ if(SP_POINTS[s[f]]!=null) q.push(SP_POINTS[s[f]]); }));
+  if(q.length) parts.push([q.reduce((a,b)=>a+b,0)/q.length,20]);
+  const a=spAttendance(r); if(a) parts.push([a.pct,40]);
+  const ap=Object.values(r.appearance||{}).map(v=>SP_POINTS[v]).filter(v=>v!=null);
+  if(ap.length) parts.push([ap.reduce((x,y)=>x+y,0)/ap.length,10]);
+  const w=parts.reduce((x,y)=>x+y[1],0); return w?parts.reduce((x,y)=>x+y[0]*y[1],0)/w:0;
+}
+function spSummaryHTML(r){
+  const m=spMarks(r), a=spAttendance(r), ap=r.appearance||{};
+  return `<table style="margin-top:10px;"><tr><th>Total Marks</th><th>Percentage</th><th>Attendance (Present / Absent / Leave)</th>${APPEARANCE_FIELDS.map(f=>`<th>${f[1]}</th>`).join('')}<th>Overall Score</th></tr>
+  <tr><td class="mono">${m.t?m.o+' / '+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td><td class="mono">${a?`${a.present} / ${a.absent} / ${a.leave} (of ${a.days} days)`:'-'}</td>${APPEARANCE_FIELDS.map(f=>`<td>${esc(ap[f[0]]||'-')}</td>`).join('')}<td class="mono"><strong>${spScore(r).toFixed(1)}</strong></td></tr></table>`;
+}
+function spReports(session,cls,month){ return DB.progressReports.filter(r=>r.session===session && r.className===cls && r.month===month && (r.subjects||[]).length); }
+// Subject-wise: har subject ka alag table, poori class ke students ke sath
+function buildSubjectWiseHTML(session,cls,month){
+  const reps=spReports(session,cls,month); if(!reps.length) return null;
+  const subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); }));
+  const blocks=subs.map(sub=>{
+    const rows=reps.map(r=>({r,s:r.subjects.find(x=>x.subject===sub)})).filter(x=>x.s).sort((a,b)=>(a.r.studentName||'').localeCompare(b.r.studentName||''));
+    return `<div class="gazette-block" style="margin-bottom:22px;"><h3>${esc(sub)}</h3><table><tr><th>Roll</th><th>Student</th><th>Learning</th><th>Behavior</th><th>Listening</th><th>Writing</th><th>Marks</th><th>Attendance P/A/L</th></tr>${rows.map(({r,s})=>{const at=spAttendance(r);return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${s.test?esc(s.test.obtained||0)+' / '+esc(s.test.total||0):'-'}</td><td class="mono">${at?at.present+' / '+at.absent+' / '+at.leave:'-'}</td></tr>`;}).join('')}</table></div>`;
+  }).join('');
+  return `${schoolBrandHTML('Subject-wise Report &mdash; Class '+esc(cls)+' &middot; '+esc(month)+' &middot; '+esc(session))}${blocks}`;
+}
+function buildAllSubjectsHTML(session,cls,month){
+  const reps=spReports(session,cls,month); if(!reps.length) return null;
+  const subs=[]; reps.forEach(r=>r.subjects.forEach(s=>{ if(!subs.includes(s.subject)) subs.push(s.subject); }));
+  const rows=[...reps].sort((a,b)=>Number(a.rollNo)-Number(b.rollNo)).map(r=>{ const m=spMarks(r), at=spAttendance(r);
+    return `<tr><td class="mono">${esc(r.rollNo)}</td><td>${esc(r.studentName)}</td>${subs.map(sb=>{const x=r.subjects.find(y=>y.subject===sb);return `<td class="mono">${x&&x.test?esc(x.test.obtained||0)+'/'+esc(x.test.total||0):'-'}</td>`;}).join('')}<td class="mono">${m.t?m.o+'/'+m.t:'-'}</td><td class="mono">${m.pct!=null?m.pct.toFixed(1)+'%':'-'}</td><td class="mono">${at?at.present:'-'}</td><td class="mono">${at?at.absent:'-'}</td><td class="mono">${at?at.leave:'-'}</td></tr>`; }).join('');
+  return `${schoolBrandHTML('Monthly Test Report (All Subjects) &mdash; Class '+esc(cls)+' &middot; '+esc(month)+' &middot; '+esc(session))}<div style="overflow-x:auto;"><table><tr><th>Roll</th><th>Student</th>${subs.map(x=>`<th>${esc(x)}</th>`).join('')}<th>Total</th><th>%</th><th>Present</th><th>Absent</th><th>Leave</th></tr>${rows}</table></div>`;
+}
+// Student of the Month (class) - reports dekh kar highest overall score
+function spTopOfClass(session,cls,month){ const reps=spReports(session,cls,month); if(!reps.length) return null; return reps.map(r=>({r,sc:spScore(r)})).sort((a,b)=>b.sc-a.sc)[0]; }
+function spStarsHTML(session,cls,month){
+  const t=spTopOfClass(session,cls,month); if(!t) return '';
+  return `<div class="gazette-block" style="margin-top:14px;"><strong>&#11088; Student of the Month (Class ${esc(cls)}):</strong> ${esc(t.r.studentName)} &mdash; Score ${t.sc.toFixed(1)}</div>`;
+}
+function renderHomeSOM(){
+  const box=document.getElementById('homeSOM'); if(!box) return;
+  const reps=DB.progressReports.filter(r=>(r.subjects||[]).length);
+  if(!reps.length){ box.innerHTML=''; return; }
+  const latest=[...reps].sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0]; const {session,month}=latest;
+  const classes=[...new Set(reps.filter(r=>r.session===session&&r.month===month).map(r=>r.className))];
+  const tops=classes.map(c=>({c,t:spTopOfClass(session,c,month)})).filter(x=>x.t);
+  if(!tops.length){ box.innerHTML=''; return; }
+  const school=[...tops].sort((a,b)=>b.t.sc-a.t.sc)[0];
+  const subjRows=classes.map(c=>{ const rs=spReports(session,c,month), by={};
+    rs.forEach(r=>r.subjects.forEach(s=>{ if(s.test&&Number(s.test.total)){ (by[s.subject]=by[s.subject]||[]).push(Number(s.test.obtained||0)/Number(s.test.total)*100); } }));
+    return `<tr><td>${esc(c)}</td><td>${Object.keys(by).map(k=>`${esc(k)}: <span class="mono">${(by[k].reduce((a,b)=>a+b,0)/by[k].length).toFixed(0)}%</span>`).join(' &middot; ')||'-'}</td></tr>`; }).join('');
+  box.innerHTML=`<div class="gazette-block" style="margin:18px 0;"><h3>&#127942; Student of the School &mdash; ${esc(month)}</h3><p><strong>${esc(school.t.r.studentName)}</strong> (Class ${esc(school.c)}) &mdash; Score ${school.t.sc.toFixed(1)}</p>
+  <h3 style="margin-top:14px;">&#11088; Students of the Month (Class-wise)</h3><table><tr><th>Class</th><th>Student</th><th>Score</th></tr>${tops.map(x=>`<tr><td>${esc(x.c)}</td><td>${esc(x.t.r.studentName)}</td><td class="mono">${x.t.sc.toFixed(1)}</td></tr>`).join('')}</table>
+  <h3 style="margin-top:14px;">&#128218; Subject-wise Average (Test Marks)</h3><table><tr><th>Class</th><th>Subjects</th></tr>${subjRows}</table></div>`;
+}
+const _afvOrig=applyFeatureVisibility; applyFeatureVisibility=function(){ _afvOrig(); try{ renderHomeSOM(); }catch(e){ console.error(e); } };
 function populateGazetteFilters(){
   const sessions = Array.from(new Set(DB.enrollments.map(e=>e.session).filter(Boolean))).sort().reverse();
   const sel = document.getElementById('gzSession');
@@ -3128,10 +3205,10 @@ function renderAdminPanel(){
         <div class="field"><label>Class</label><select required id="qpClass" onchange="renderQuickProgressSubjectPicker()">${classOptionsHTML()}</select></div>
       </div>
       <div class="row-2" style="max-width:700px;">
-        <div class="field"><label>Month / Period</label><input required id="qpMonth" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderQuickProgressGrid();"></div>
+        <div class="field"><label>Month / Period</label><input required id="qpMonth" list="progressMonthList" autocomplete="off" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderQuickProgressGrid();"></div>
         <div class="field"><label>Subject</label><select required id="qpSubject" onchange="renderQuickProgressGrid()"><option value="">Select class first</option></select></div>
       </div>
-      <div id="quickProgressGridWrap" style="overflow-x:auto;margin-top:14px;"></div>
+      ${progressMonthDatalist()}<div id="quickProgressGridWrap" style="overflow-x:auto;margin-top:14px;"></div>
     </div>
 
     <div class="admin-block">
@@ -3144,13 +3221,14 @@ function renderAdminPanel(){
             <select required id="prClass" onchange="renderProgressStudentPicker()">${classOptionsHTML()}</select>
           </div>
         </div>
-        <div class="field"><label>Month / Period</label><input required id="prMonth" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderProgressSubjectPicker();"></div>
+        <div class="field"><label>Month / Period</label><input required id="prMonth" list="progressMonthList" autocomplete="off" placeholder="e.g. September 2026" value="${esc(lastUsedProgressMonth)}" oninput="rememberProgressMonth(); renderProgressSubjectPicker();"></div>
         <div class="field"><label>Student</label>
           <select required id="prStudent" onchange="suggestProgressMonthAndRender()">
             <option value="">Select class and session first</option>
           </select>
         </div>
         <div id="progressSubjectPicker"></div>
+        <div class="field"><label>Uniform / Appearance (bache ka uniform waghera)</label><div id="prAppearance" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${APPEARANCE_FIELDS.map(f=>`<div><label style="font-size:12px;">${f[1]}</label><select class="pr-app" data-key="${f[0]}"><option value="">-- Select --</option>${APPEARANCE_OPTS.map(o=>`<option>${o}</option>`).join('')}</select></div>`).join('')}</div></div>
         <div class="field"><label>Overall Remarks</label><textarea id="prOverall" rows="3" placeholder="Overall progress, general behavior, attendance etc."></textarea></div>
         <div style="margin-top:16px;">
           <button type="submit" class="btn-gold">Save Progress Report</button>
@@ -3163,7 +3241,7 @@ function renderAdminPanel(){
       ${(() => {
         const sessions = ['All', ...Array.from(new Set(DB.progressReports.map(r=>r.session).filter(Boolean))).sort().reverse()];
         const filtered = DB.progressReports.filter(r=> progressAdminSessionFilter==='All' || r.session===progressAdminSessionFilter);
-        return `<div class="filter-chips">${sessions.map(s=>`<button type="button" class="chip ${s===progressAdminSessionFilter?'active':''}" onclick="progressAdminSessionFilter='${esc(s)}'; renderAdminPanel();">${s==='All'?'All Sessions':esc(s)}</button>`).join('')}</div>
+        return `<div class="filter-chips">${sessions.map(s=>`<button type="button" class="chip ${s===progressAdminSessionFilter?'active':''}" onclick="progressAdminSessionFilter='${esc(s)}'; renderAdminPanelKeep();">${s==='All'?'All Sessions':esc(s)}</button>`).join('')}</div>
         ${filtered.length ? `<table style="margin-top:14px;">
         <tr><th class="mono">Roll No</th><th>Name</th><th class="mono">Session</th><th>Class</th><th>Month/Period</th><th class="mono">Subjects</th><th></th></tr>
         ${[...filtered].sort((a,b)=>(b.session||'').localeCompare(a.session||'') || (b.month||'').localeCompare(a.month||'')).map(r=>{
@@ -3807,6 +3885,7 @@ function renderAdminPanel(){
       });
     });
     const overallRemarks = document.getElementById('prOverall').value.trim();
+    const appearance = {}; document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ if(x.value) appearance[x.dataset.key]=x.value; });
     const editId = progressEditingId;
     const existingIdx = editId
       ? DB.progressReports.findIndex(r=>r.id===editId)
@@ -3815,7 +3894,7 @@ function renderAdminPanel(){
       id: existingIdx>=0 ? DB.progressReports[existingIdx].id : uid(),
       rollNo, session, className, month,
       studentName: stu ? stu.name : (existingIdx>=0 ? DB.progressReports[existingIdx].studentName : ''),
-      subjects, overallRemarks,
+      subjects, overallRemarks, appearance,
       date: new Date().toISOString().slice(0,10)
     };
     if(existingIdx>=0) DB.progressReports[existingIdx] = record; else DB.progressReports.push(record);
@@ -3823,7 +3902,7 @@ function renderAdminPanel(){
     progressEditingId = null;
     document.getElementById('prMonth').value = '';
     document.getElementById('prOverall').value = '';
-    renderAdminPanel();
+    renderAdminPanelKeep();
   });
 
   document.getElementById('feeForm').addEventListener('submit', async e=>{
@@ -4771,9 +4850,7 @@ async function saveQuickProgressGrid(){
   if(!savedCount){ alert('Koi row bhari hui nahi mili &mdash; kam az kam ek student ka data bharein.'); return; }
   await setData('progressReports', DB.progressReports);
   alert(`${savedCount} students ke "${subject}" progress save ho gaye.`);
-  const _sy = window.scrollY;
-  renderAdminPanel();
-  window.scrollTo(0, _sy);
+  renderAdminPanelKeep();
 }
 // ============================================================
 // MONTHLY PROGRESS REPORT (subject-wise Learning/Behavior/Listening remarks)
@@ -4799,8 +4876,26 @@ function renderProgressStudentPicker(){
   }).join('');
   document.getElementById('progressSubjectPicker').innerHTML = '';
 }
+// Admin panel dobara draw karte waqt Quick Entry / Monthly Progress form ki selection aur scroll position wapas bahal karta hai
+function renderAdminPanelKeep(){
+  const ids=['qpSession','qpClass','qpMonth','qpSubject','prSession','prClass','prMonth','prStudent'];
+  const saved={}; ids.forEach(i=>{ const e=document.getElementById(i); if(e) saved[i]=e.value; });
+  const y=window.scrollY;
+  renderAdminPanel();
+  const set=(i)=>{ const e=document.getElementById(i); if(e && saved[i]!==undefined) e.value=saved[i]; };
+  try{
+    set('qpSession'); set('qpClass'); set('qpMonth');
+    if(saved.qpClass){ renderQuickProgressSubjectPicker(); set('qpSubject'); renderQuickProgressGrid(); }
+    set('prSession'); set('prClass'); set('prMonth');
+    if(saved.prClass && document.getElementById('prStudent')){ renderProgressStudentPicker(); set('prStudent'); if(saved.prStudent) renderProgressSubjectPicker(); }
+  }catch(e){ console.error(e); }
+  window.scrollTo(0,y); requestAnimationFrame(()=>window.scrollTo(0,y));
+}
+function progressMonthDatalist(){ return '<datalist id="progressMonthList">'+[...new Set(DB.progressReports.map(r=>r.month).filter(Boolean))].map(m=>`<option value="${esc(m)}">`).join('')+'</datalist>'; }
 function rememberProgressMonth(){
-  const val = document.getElementById('prMonth').value.trim();
+  const el = document.activeElement;
+  const src = (el && (el.id==='qpMonth' || el.id==='prMonth')) ? el : (document.getElementById('qpMonth') || document.getElementById('prMonth'));
+  const val = ((src && src.value) || '').trim();
   if(val) lastUsedProgressMonth = val;
 }
 // Called when the Student dropdown changes: suggests the last-used month (so
@@ -4832,7 +4927,9 @@ function renderProgressSubjectPicker(){
   if(existing){
     progressEditingId = existing.id;
     document.getElementById('prOverall').value = existing.overallRemarks || '';
+    document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ x.value=(existing.appearance||{})[x.dataset.key]||''; });
   } else {
+    document.querySelectorAll('#prAppearance .pr-app').forEach(x=>{ x.value=''; });
     progressEditingId = null;
     document.getElementById('prOverall').value = '';
   }
@@ -4887,7 +4984,7 @@ async function deleteProgressReport(id){
   if(!confirm('Kya aap waqai ye progress report remove karna chahte hain?')) return;
   DB.progressReports = DB.progressReports.filter(r=>r.id!==id);
   await setData('progressReports', DB.progressReports);
-  renderAdminPanel();
+  renderAdminPanelKeep();
 }
 
 function handlePhotoUpload(e){
