@@ -264,6 +264,7 @@
     <div class="nav-dropdown-menu">
       <button data-tab="datesheet">Date Sheet</button>
       <button data-tab="gazette" id="navGazetteBtn">Result Gazette</button>
+      <button data-tab="progresspublic" id="navProgressPublicBtn">Monthly Progress</button>
       <button data-tab="calendar">Academic Calendar</button>
       <button data-tab="notes">Study Notes</button>
       <button data-tab="pairing">Pairing Scheme</button>
@@ -351,6 +352,12 @@
         <h3>Result Gazette</h3>
         <p>Full class result sheet, generated automatically once results are released.</p>
         <button data-goto="gazette">View gazette &rarr;</button>
+      </div>
+      <div class="quick-card" id="homeProgressCard">
+        <div class="badge">M</div>
+        <h3>Monthly Progress</h3>
+        <p>Class-wise monthly progress &mdash; Learning, Behavior, Listening and Writing for every student.</p>
+        <button data-goto="progresspublic">View progress &rarr;</button>
       </div>
       <div class="quick-card">
         <div class="badge">C</div>
@@ -560,6 +567,19 @@
     </div>
     <button class="btn-gold" onclick="renderGazette()">Show Gazette</button>
     <div id="gazetteOutput" style="margin-top:20px;"></div>
+  </section>
+
+  <!-- MONTHLY PROGRESS (PUBLIC) -->
+  <section class="tab" id="tab-progresspublic">
+    <div class="section-title"><span class="num">07B</span><h2>Monthly Progress</h2></div>
+    <p class="section-sub">Class-wise monthly progress report &mdash; shows each student's name and father's name with their Learning, Behavior, Listening/Sunna, and Writing for the month.</p>
+    <div class="row-2" style="max-width:520px;">
+      <div class="field"><label>Session / Year</label><select id="ppSession"><option value="">Select session</option></select></div>
+      <div class="field"><label>Class</label><select id="ppClass"></select></div>
+    </div>
+    <div class="field" style="max-width:520px;"><label>Month / Period</label><input id="ppMonth" placeholder="e.g. September 2026"></div>
+    <button class="btn-gold" onclick="renderProgressPublic()">Show Progress</button>
+    <div id="progressPublicOutput" style="margin-top:20px;"></div>
   </section>
 
   <!-- ABOUT US -->
@@ -954,7 +974,7 @@ function printHTML(html){
   setTimeout(()=>{ legitimatePrintInProgress = false; }, 1000);
 }
 
-let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], progressReports:[], subjectTotalMarks:{}, settings:{ gazetteVisible:false } };
+let DB = { notifications:[], students:[], admissions:[], datesheet:[], results:[], enrollments:[], classSubjects:{}, aboutUs:[], complaints:[], studentAccounts:{}, academicCalendar:[], notes:[], pairingSchemes:[], attendance:[], studentRequests:[], feeRecords:[], progressReports:[], subjectTotalMarks:{}, settings:{ gazetteVisible:false, progressPublicVisible:false } };
 let calSessionFilter = 'All';
 let isAdmin = false;
 let dsClassFilter = 'All';
@@ -1016,11 +1036,12 @@ async function loadAll(){
   DB.studentRequests = await getData('studentRequests', []);
   DB.feeRecords = await getData('feeRecords', []);
   DB.progressReports = await getData('progressReports', []);
-  DB.settings = await getData('settings', { gazetteVisible:false });
+  DB.settings = await getData('settings', { gazetteVisible:false, progressPublicVisible:false });
 }
 
-// Shows/hides the Result Gazette nav option and homepage card based on the
-// admin's Site Settings toggle. Called after load and whenever the toggle changes.
+// Shows/hides the Result Gazette and Monthly Progress nav options and
+// homepage cards based on the admin's Site Settings toggles. Called after
+// load and whenever a toggle changes.
 function applyFeatureVisibility(){
   const show = !!(DB.settings && DB.settings.gazetteVisible);
   const navBtn = document.getElementById('navGazetteBtn');
@@ -1032,9 +1053,24 @@ function applyFeatureVisibility(){
     const gazTab = document.getElementById('tab-gazette');
     if(gazTab && gazTab.classList.contains('active')) goto('home');
   }
+  const showProgress = !!(DB.settings && DB.settings.progressPublicVisible);
+  const progNavBtn = document.getElementById('navProgressPublicBtn');
+  const progHomeCard = document.getElementById('homeProgressCard');
+  if(progNavBtn) progNavBtn.style.display = showProgress ? '' : 'none';
+  if(progHomeCard) progHomeCard.style.display = showProgress ? '' : 'none';
+  if(!showProgress){
+    const progTab = document.getElementById('tab-progresspublic');
+    if(progTab && progTab.classList.contains('active')) goto('home');
+  }
 }
 async function toggleGazetteVisibility(){
   DB.settings.gazetteVisible = !DB.settings.gazetteVisible;
+  await setData('settings', DB.settings);
+  applyFeatureVisibility();
+  renderAdminPanel();
+}
+async function toggleProgressPublicVisibility(){
+  DB.settings.progressPublicVisible = !DB.settings.progressPublicVisible;
   await setData('settings', DB.settings);
   applyFeatureVisibility();
   renderAdminPanel();
@@ -1071,6 +1107,7 @@ function goto(tab){
   if(tab==='notes') showNotesTab();
   if(tab==='pairing') renderPairingScheme();
   if(tab==='gazette') populateGazetteFilters();
+  if(tab==='progresspublic') populateProgressPublicFilters();
   if(tab==='aboutus') renderAboutUs();
   if(tab==='admin') renderAdminPanel();
 }
@@ -1088,6 +1125,7 @@ const SEARCHABLE_PAGES = [
   { tab:'admission', title:'Admissions' },
   { tab:'datesheet', title:'Date Sheet' },
   { tab:'gazette', title:'Result Gazette' },
+  { tab:'progresspublic', title:'Monthly Progress' },
   { tab:'calendar', title:'Academic Calendar' },
   { tab:'notes', title:'Study Notes' },
   { tab:'pairing', title:'Pairing Scheme' },
@@ -1978,6 +2016,57 @@ function renderAboutUs(){
     </div>`).join('') + `</div>`;
 }
 
+// Public, no-login Monthly Progress page: class-wise list of every student
+// with a progress report for the chosen session/class/month, showing just
+// their name and father's name (no roll no, no photo) followed by their
+// subject-wise Learning/Behavior/Listening/Writing and any test result.
+function populateProgressPublicFilters(){
+  const sessions = Array.from(new Set(DB.enrollments.map(e=>e.session).filter(Boolean))).sort().reverse();
+  const sel = document.getElementById('ppSession');
+  sel.innerHTML = '<option value="">Select session</option>' + sessions.map(s=>`<option>${esc(s)}</option>`).join('');
+  const classSel = document.getElementById('ppClass');
+  classSel.innerHTML = classOptionsHTML();
+}
+function buildProgressPublicHTML(session, className, month){
+  const reports = DB.progressReports.filter(r=>r.session===session && r.className===className && r.month===month && (r.subjects||[]).length);
+  if(!reports.length) return null;
+  reports.sort((a,b)=>(a.studentName||'').localeCompare(b.studentName||''));
+  const cards = reports.map(r=>{
+    const stu = DB.students.find(s=>s.name===r.studentName) || {};
+    const en = DB.enrollments.find(en=>en.rollNo===r.rollNo && en.session===session && en.className===className);
+    const fatherName = (en && DB.students.find(s=>s.id===en.studentId)?.fatherName) || stu.fatherName || '-';
+    return `<div class="gazette-block" style="margin-bottom:22px;">
+      <h3 style="margin-bottom:2px;">${esc(r.studentName||'-')}</h3>
+      <p class="note-inline" style="margin:0 0 10px;">Father's Name: ${esc(fatherName)}</p>
+      <table>
+        <tr><th>Subject</th><th>Learning</th><th>Behavior</th><th>Listening/Sunna</th><th>Writing</th><th>Test</th></tr>
+        ${r.subjects.map(s=>{
+          const t = s.test;
+          const testCell = t ? `${t.date?fmtDate(t.date)+' &middot; ':''}${esc(t.obtained||'0')} / ${esc(t.total||'0')}` : '-';
+          return `<tr><td>${esc(s.subject)}</td><td>${esc(s.learning||'-')}</td><td>${esc(s.behavior||'-')}</td><td>${esc(s.listening||'-')}</td><td>${esc(s.writing||'-')}</td><td class="mono">${testCell}</td></tr>`;
+        }).join('')}
+      </table>
+      ${r.overallRemarks ? `<p style="margin-top:10px;"><strong>Overall Remarks:</strong> ${esc(r.overallRemarks)}</p>` : ''}
+    </div>`;
+  }).join('');
+  return `${schoolBrandHTML('Monthly Progress &mdash; Class ' + esc(className) + ' &middot; ' + esc(month) + ' &middot; Session ' + esc(session))}${cards}`;
+}
+function renderProgressPublic(){
+  const session = document.getElementById('ppSession').value;
+  const className = document.getElementById('ppClass').value;
+  const month = document.getElementById('ppMonth').value.trim();
+  const out = document.getElementById('progressPublicOutput');
+  if(!session || !className || !month){ out.innerHTML = '<div class="msg-err">Session, Class aur Month teeno select/likh dein.</div>'; return; }
+  const html = buildProgressPublicHTML(session, className, month);
+  if(!html){
+    out.innerHTML = '<div class="empty">Is class, session aur month ke liye abhi progress report available nahi hai.</div>';
+    return;
+  }
+  out.innerHTML = `<div id="progressPublicPrintable">${html}</div>
+  <div style="margin-top:14px;">
+    <button class="tag-btn ghost" onclick="printHTML(document.getElementById('progressPublicPrintable').outerHTML)">Print</button>
+  </div>`;
+}
 function populateGazetteFilters(){
   const sessions = Array.from(new Set(DB.enrollments.map(e=>e.session).filter(Boolean))).sort().reverse();
   const sel = document.getElementById('gzSession');
@@ -2800,6 +2889,13 @@ function renderAdminPanel(){
           <p class="note-inline" style="margin:2px 0 0;">Nav menu aur homepage par "Result Gazette" option ${DB.settings.gazetteVisible ? 'is waqt visitors ko dikh raha hai.' : 'is waqt chupa hua hai.'}</p>
         </div>
         <button type="button" class="tag-btn ${DB.settings.gazetteVisible?'ghost':''}" onclick="toggleGazetteVisibility()">${DB.settings.gazetteVisible ? 'Turn Off' : 'Turn On'}</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--line);border-radius:8px;margin-top:10px;">
+        <div>
+          <b>Monthly Progress (public, no login)</b>
+          <p class="note-inline" style="margin:2px 0 0;">Nav menu aur homepage par "Monthly Progress" option ${DB.settings.progressPublicVisible ? 'is waqt visitors ko dikh raha hai &mdash; koi bhi bina login class/month select karke dekh sakta hai.' : 'is waqt chupa hua hai.'}</p>
+        </div>
+        <button type="button" class="tag-btn ${DB.settings.progressPublicVisible?'ghost':''}" onclick="toggleProgressPublicVisibility()">${DB.settings.progressPublicVisible ? 'Turn Off' : 'Turn On'}</button>
       </div>
     </div>
 
